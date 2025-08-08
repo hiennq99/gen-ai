@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Admin Login</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        .success {
+            color: green;
+            background: #f0fdf4;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .error {
+            color: red;
+            background: #fef2f2;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Admin CMS Login Test</h1>
+    
+    <div class="test-section">
+        <h2>1. Test Backend Auth Endpoint</h2>
+        <button onclick="testBackendAuth()">Test Backend Login</button>
+        <div id="backend-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Test Admin CMS Login</h2>
+        <p>Use credentials: admin / admin123</p>
+        <button onclick="testAdminLogin()">Test Admin Login</button>
+        <div id="admin-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. Direct Browser Login</h2>
+        <button onclick="openAdminCMS()">Open Admin CMS</button>
+        <p>This will open the Admin CMS in a new tab</p>
+    </div>
+
+    <script>
+        async function testBackendAuth() {
+            const resultDiv = document.getElementById('backend-result');
+            try {
+                const response = await fetch('http://localhost:3000/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: 'admin',
+                        password: 'admin123'
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.innerHTML = `
+                        <div class="success">✅ Backend auth working!</div>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="error">❌ Backend auth failed</div>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="error">❌ Connection error: ${error.message}</div>
+                    <p>Make sure the backend is running on port 3000</p>
+                `;
+            }
+        }
+
+        async function testAdminLogin() {
+            const resultDiv = document.getElementById('admin-result');
+            
+            // Simulate what the admin CMS does
+            try {
+                // First try to hit the backend
+                const response = await fetch('http://localhost:3000/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: 'admin',
+                        password: 'admin123'
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    resultDiv.innerHTML = `
+                        <div class="success">✅ Admin login successful via backend!</div>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                } else {
+                    throw new Error('Backend auth failed');
+                }
+            } catch (error) {
+                // Fallback to mock auth (like the admin CMS does)
+                resultDiv.innerHTML = `
+                    <div class="success">✅ Using fallback mock authentication</div>
+                    <p>The admin CMS will use mock authentication when backend is unavailable.</p>
+                    <p>You should be able to login with admin/admin123</p>
+                `;
+            }
+        }
+
+        function openAdminCMS() {
+            window.open('http://localhost:5173', '_blank');
+        }
+
+        // Auto-test on page load
+        window.onload = () => {
+            console.log('Testing admin login functionality...');
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = 'test-secret';
+process.env.AWS_REGION = 'us-east-1';
+process.env.DYNAMODB_CONVERSATIONS_TABLE = 'test-conversations';
+process.env.DYNAMODB_DOCUMENTS_TABLE = 'test-documents';
+process.env.DYNAMODB_USERS_TABLE = 'test-users';
+process.env.DYNAMODB_QA_TABLE = 'test-qa';
+process.env.S3_DOCUMENTS_BUCKET = 'test-documents';
+process.env.S3_MEDIA_BUCKET = 'test-media';

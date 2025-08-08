@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: ai-chatbot-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - app-network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: ai-chatbot-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - AWS_REGION=${AWS_REGION:-ap-southeast-2}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DYNAMODB_CONVERSATIONS_TABLE=ai-chatbot-conversations
+      - DYNAMODB_DOCUMENTS_TABLE=ai-chatbot-documents
+      - DYNAMODB_USERS_TABLE=ai-chatbot-users
+      - DYNAMODB_QA_TABLE=ai-chatbot-qa
+      - S3_DOCUMENTS_BUCKET=ai-chatbot-documents-a354f3e7
+      - S3_MEDIA_BUCKET=ai-chatbot-media-a354f3e7
+      - JWT_SECRET=your_jwt_secret_key_here_change_this_in_production
+      - FRONTEND_URL=http://localhost:3001
+      - ADMIN_URL=http://localhost:5173
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    command: npm run dev
+
+  # Frontend Chat Interface
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: ai-chatbot-frontend
+    ports:
+      - "3001:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:3000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:3000
+    depends_on:
+      - backend
+    networks:
+      - app-network
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
+
+  # Admin CMS
+  admin-cms:
+    build:
+      context: ./admin-cms
+      dockerfile: Dockerfile.dev
+    container_name: ai-chatbot-admin
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:3000/api/v1
+    depends_on:
+      - backend
+    networks:
+      - app-network
+    volumes:
+      - ./admin-cms:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  redis-data:
