@@ -70,6 +70,17 @@ export class DocumentsController {
     return await this.documentsService.getDocument(id);
   }
 
+  @Delete('all')
+  @ApiOperation({ summary: 'Delete all documents' })
+  async deleteAllDocuments() {
+    const result = await this.documentsService.deleteAllDocuments();
+    return { 
+      success: true,
+      message: 'All documents deleted successfully',
+      ...result
+    };
+  }
+
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a document' })
   async deleteDocument(@Param('id') id: string) {

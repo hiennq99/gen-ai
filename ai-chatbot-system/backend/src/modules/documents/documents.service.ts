@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { DocumentProcessor } from './document-processor.service';
+import { QASplitterService } from './qa-splitter.service';
 import { StorageService } from '../storage/storage.service';
 import { SearchService } from '../search/search.service';
 import { DatabaseService } from '../database/database.service';
@@ -14,6 +15,7 @@ export class DocumentsService {
 
   constructor(
     private readonly documentProcessor: DocumentProcessor,
+    private readonly qaSplitter: QASplitterService,
     private readonly storageService: StorageService,
     private readonly searchService: SearchService,
     private readonly databaseService: DatabaseService,
@@ -33,6 +35,15 @@ export class DocumentsService {
 
       // Extract content based on file type
       const content = await this.documentProcessor.extractContent(file);
+
+      // Check if content is Q&A format
+      const qaPairs = this.qaSplitter.detectAndSplitQA(content, file.originalname);
+      
+      if (qaPairs && qaPairs.length > 0) {
+        // Process as Q&A document - split into individual entries
+        this.logger.log(`Detected ${qaPairs.length} Q&A pairs in document ${file.originalname}`);
+        return await this.processQADocument(file, qaPairs, metadata, s3Url);
+      }
 
       // Create document record (don't save full content here to avoid size limits)
       const document: Document = {
@@ -68,6 +79,109 @@ export class DocumentsService {
       this.logger.error('Error uploading document:', error);
       throw error;
     }
+  }
+
+  private async processQADocument(
+    file: Express.Multer.File,
+    qaPairs: any[],
+    metadata: any,
+    s3Url: string
+  ): Promise<Document> {
+    const parentDocumentId = uuidv4();
+    const documents: Document[] = [];
+    
+    // Create parent document record
+    const parentDocument: Document = {
+      id: parentDocumentId,
+      title: metadata?.title || file.originalname,
+      type: 'qa-collection',
+      size: file.size,
+      s3Url,
+      content: `Q&A Collection: ${qaPairs.length} pairs`,
+      uploadedAt: Date.now(),
+      uploadedAtISO: new Date().toISOString(),
+      status: 'processing',
+      metadata: {
+        ...metadata,
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+        isQACollection: true,
+        totalQAPairs: qaPairs.length,
+      },
+    };
+    
+    await this.databaseService.saveDocument(parentDocument);
+    
+    // Process each Q&A pair as individual document
+    for (const [index, qa] of qaPairs.entries()) {
+      try {
+        const qaDocumentId = uuidv4();
+        const qaContent = this.qaSplitter.formatQAPair(qa);
+        
+        // Create individual Q&A document
+        const qaDocument: Document = {
+          id: qaDocumentId,
+          title: qa.question.substring(0, 100),
+          type: 'qa',
+          size: qaContent.length,
+          uploadedAt: Date.now(),
+          uploadedAtISO: new Date().toISOString(),
+          status: 'processed',
+          content: qaContent, // Store full Q&A content since it's small
+          metadata: {
+            ...qa.metadata,
+            parentDocumentId,
+            qaIndex: index + 1,
+            question: qa.question,
+            answer: qa.answer,
+            emotion: qa.metadata?.emotion,
+            category: qa.metadata?.category,
+            source: file.originalname,
+          },
+        };
+        
+        // Save to database
+        await this.databaseService.saveDocument(qaDocument);
+        
+        // Generate embedding for better search
+        const embedding = await this.searchService.generateEmbedding(qaContent);
+        
+        // Index in OpenSearch for search
+        await this.searchService.indexDocument({
+          id: qaDocumentId,
+          documentId: qaDocumentId,
+          title: qa.question,
+          content: qaContent,
+          text: qaContent,
+          embedding,
+          metadata: {
+            type: 'qa',
+            question: qa.question,
+            answer: qa.answer,
+            emotion: qa.metadata?.emotion,
+            parentDocumentId,
+            qaIndex: index + 1,
+          },
+        });
+        
+        documents.push(qaDocument);
+        this.logger.debug(`Processed Q&A ${index + 1}/${qaPairs.length}: ${qa.question.substring(0, 50)}...`);
+      } catch (error) {
+        this.logger.error(`Failed to process Q&A pair ${index + 1}:`, error);
+      }
+    }
+    
+    // Update parent document status
+    await this.databaseService.updateDocumentStatus(parentDocumentId, 'processed', {
+      processedQAPairs: documents.length,
+      failedQAPairs: qaPairs.length - documents.length,
+      processedAt: Date.now(),
+      processedAtISO: new Date().toISOString(),
+    });
+    
+    this.logger.log(`Successfully processed ${documents.length}/${qaPairs.length} Q&A pairs from ${file.originalname}`);
+    
+    return parentDocument;
   }
 
   async processDocumentContent(documentId: string, content: string): Promise<ProcessingResult> {
@@ -330,5 +444,39 @@ export class DocumentsService {
       'application/json': 'json',
     };
     return typeMap[mimeType as keyof typeof typeMap] || 'unknown';
+  }
+
+  async deleteAllDocuments(): Promise<{ deletedCount: number; errors: string[] }> {
+    const errors: string[] = [];
+    let deletedCount = 0;
+
+    try {
+      // Get all documents
+      const documents = await this.listDocuments();
+      this.logger.log(`Found ${documents.length} documents to delete`);
+
+      // Delete each document
+      for (const doc of documents) {
+        try {
+          await this.deleteDocument(doc.id);
+          deletedCount++;
+          this.logger.debug(`Deleted document ${doc.id}: ${doc.title}`);
+        } catch (error) {
+          const errorMsg = `Failed to delete document ${doc.id}: ${error.message}`;
+          this.logger.error(errorMsg);
+          errors.push(errorMsg);
+        }
+      }
+
+      this.logger.log(`Successfully deleted ${deletedCount} out of ${documents.length} documents`);
+      
+      return {
+        deletedCount,
+        errors
+      };
+    } catch (error) {
+      this.logger.error('Error deleting all documents:', error);
+      throw error;
+    }
   }
 }

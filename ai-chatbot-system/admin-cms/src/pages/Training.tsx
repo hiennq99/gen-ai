@@ -335,6 +335,30 @@ export default function Training() {
                     Select Documents
                     <Button 
                       size="small" 
+                      type="link"
+                      onClick={() => {
+                        if (documents && documents.length > 0) {
+                          const allDocIds = documents
+                            .filter((doc: any) => doc.status === 'processed' || doc.status === 'completed')
+                            .map((doc: any) => doc.id);
+                          form.setFieldsValue({ documents: allDocIds });
+                        }
+                      }}
+                      disabled={documentsLoading || !documents || documents.length === 0}
+                    >
+                      Select All
+                    </Button>
+                    <Button 
+                      size="small" 
+                      type="link"
+                      onClick={() => {
+                        form.setFieldsValue({ documents: [] });
+                      }}
+                    >
+                      Clear All
+                    </Button>
+                    <Button 
+                      size="small" 
                       type="link" 
                       icon={<ReloadOutlined />}
                       onClick={() => refetchDocuments()}
@@ -345,6 +369,13 @@ export default function Training() {
                   </Space>
                 }
                 name="documents"
+                extra={
+                  documents && documents.length > 0 && (
+                    <Text type="secondary" style={{ fontSize: '12px' }}>
+                      {form.getFieldValue('documents')?.length || 0} of {documents.filter((doc: any) => doc.status === 'processed' || doc.status === 'completed').length} ready documents selected
+                    </Text>
+                  )
+                }
               >
                 <Select
                   mode="multiple"
@@ -363,9 +394,16 @@ export default function Training() {
                     const title = doc?.title || doc?.metadata?.originalName || '';
                     return title.toLowerCase().includes(input.toLowerCase());
                   }}
+                  maxTagCount="responsive"
+                  maxTagTextLength={30}
+                  maxTagPlaceholder={(omittedValues) => `+${omittedValues.length} more`}
                 >
                   {documents && Array.isArray(documents) && documents.map((doc: any) => (
-                    <Option key={doc.id} value={doc.id}>
+                    <Option 
+                      key={doc.id} 
+                      value={doc.id}
+                      disabled={doc.status !== 'processed' && doc.status !== 'completed'}
+                    >
                       {doc.title || doc.metadata?.originalName || `Document ${doc.id.substring(0, 8)}`}
                       {(doc.status === 'processed' || doc.status === 'completed') && 
                         <Tag color="green" style={{ marginLeft: 8 }}>Ready</Tag>

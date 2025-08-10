@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Card,
   Table,
@@ -34,6 +34,7 @@ export default function Documents() {
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
   const [importQAModalVisible, setImportQAModalVisible] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   const queryClient = useQueryClient();
 
   const { data: documents, isLoading } = useQuery({
@@ -60,6 +61,40 @@ export default function Documents() {
       queryClient.invalidateQueries({ queryKey: ['documents'] });
     },
   });
+
+  const handleBulkDelete = async () => {
+    Modal.confirm({
+      title: 'Delete Selected Documents',
+      content: `Are you sure you want to delete ${selectedRowKeys.length} selected document(s)?`,
+      okText: 'Delete',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          // Delete each selected document
+          for (const id of selectedRowKeys) {
+            await documentsService.deleteDocument(id);
+          }
+          message.success(`Successfully deleted ${selectedRowKeys.length} document(s)`);
+          setSelectedRowKeys([]);
+          queryClient.invalidateQueries({ queryKey: ['documents'] });
+        } catch (error) {
+          message.error('Failed to delete some documents');
+        }
+      },
+    });
+  };
+
+  const rowSelection = {
+    selectedRowKeys,
+    onChange: (newSelectedRowKeys: React.Key[]) => {
+      setSelectedRowKeys(newSelectedRowKeys as string[]);
+    },
+    getCheckboxProps: (record: any) => ({
+      disabled: record.status === 'processing',
+    }),
+  };
+
+  const hasSelected = selectedRowKeys.length > 0;
 
   const getFileIcon = (type: string) => {
     switch (type) {
@@ -214,7 +249,47 @@ export default function Documents() {
           </Space>
         }
       >
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Space>
+            <Button
+              size="small"
+              onClick={() => {
+                if (documents && documents.length > 0) {
+                  const allKeys = documents.map((doc: any) => doc.id);
+                  setSelectedRowKeys(allKeys);
+                }
+              }}
+              disabled={!documents || documents.length === 0}
+            >
+              Select All
+            </Button>
+            {hasSelected && (
+              <>
+                <Tag color="blue">
+                  {selectedRowKeys.length} of {documents?.length || 0} selected
+                </Tag>
+                <Button
+                  size="small"
+                  onClick={() => setSelectedRowKeys([])}
+                >
+                  Clear Selection
+                </Button>
+              </>
+            )}
+          </Space>
+          {hasSelected && (
+            <Button
+              type="primary"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={handleBulkDelete}
+            >
+              Delete Selected ({selectedRowKeys.length})
+            </Button>
+          )}
+        </div>
         <Table
+          rowSelection={rowSelection}
           columns={columns}
           dataSource={documents}
           loading={isLoading}
