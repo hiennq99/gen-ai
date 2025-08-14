@@ -39,8 +39,12 @@ export default function ChatInterface() {
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Header with Settings */}
-      <div className="flex justify-between items-center px-4 py-2 border-b border-gray-200">
-        <h3 className="font-semibold text-gray-800">Chat Assistant</h3>
+      <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-purple-50">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+          <h3 className="font-semibold text-gray-800">Your AI Friend</h3>
+          <span className="text-sm text-gray-600">• Always here for you</span>
+        </div>
         <ChatSettings onModeChange={handleModeChange} />
       </div>
 

@@ -29,6 +29,21 @@ export class ChatController {
     return await this.chatService.createSession(body.userId);
   }
 
+  @Post('session/emotion')
+  @ApiOperation({ summary: 'Set emotion for session start and get greeting' })
+  @ApiResponse({ status: 200, description: 'Emotional greeting response' })
+  async setSessionEmotion(@Body() body: { 
+    sessionId: string; 
+    userId: string;
+    emotion: string;
+  }) {
+    return await this.chatService.handleEmotionSelection({
+      sessionId: body.sessionId,
+      userId: body.userId,
+      emotion: body.emotion,
+    });
+  }
+
   @Post('session/:sessionId/end')
   @ApiOperation({ summary: 'End a chat session' })
   @ApiBearerAuth()

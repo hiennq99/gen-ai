@@ -5,6 +5,8 @@ import { EmotionService } from '../emotion/emotion.service';
 import { SearchService } from '../search/search.service';
 import { DatabaseService } from '../database/database.service';
 import { CacheService } from '../cache/cache.service';
+import { PersonalityService } from '../personality/personality.service';
+import type { ConversationContext } from '../personality/personality.service';
 import { ChatRequest, ChatResponse, ChatSession } from './interfaces/chat.interface';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -21,6 +23,7 @@ export class ChatService {
     private readonly searchService: SearchService,
     private readonly databaseService: DatabaseService,
     private readonly cacheService: CacheService,
+    private readonly personalityService: PersonalityService,
   ) {}
 
   async processMessage(request: ChatRequest): Promise<ChatResponse> {
@@ -39,32 +42,63 @@ export class ChatService {
       const emotionAnalysis = await this.emotionService.analyzeEmotion(request.message);
       this.logger.debug(`Detected emotion: ${emotionAnalysis.primaryEmotion}`);
 
-      // Search for relevant context
+      // Get conversation history early to check if it's first message
+      const conversationHistory = await this.getConversationHistory(request.sessionId || '');
+      
+      // Search for relevant context - prioritize exact Q&A matches
       const searchResults = await this.searchService.searchDocuments({
         query: request.message,
         emotion: emotionAnalysis.primaryEmotion,
         limit: 5,
-        minScore: 0.7,
+        minScore: 0.65, // Lowered to 65% to catch more relevant documents
+        exactMatchFirst: true, // Prioritize exact Q&A matches
       });
 
-      // Check if exact match mode is enabled (return raw document content)
-      const exactMatchMode = request.metadata?.exactMatch || 
+      // Check if we have a high-relevance match (>65% relevance)
+      const hasHighRelevanceMatch = searchResults.length > 0 && searchResults[0].score >= 0.65;
+      
+      // Check if we have an exact Q&A match (score >= 0.9 or type = qa_exact_match)
+      const hasExactQAMatch = searchResults.length > 0 && 
+                              (searchResults[0].score >= 0.9 || 
+                               searchResults[0].metadata?.type === 'qa_exact_match');
+      
+      // Use document content if relevance is above 65%
+      const exactMatchMode = hasHighRelevanceMatch || // Use document if relevance > 65%
+                            hasExactQAMatch || // Automatically use exact mode for Q&A matches
+                            request.metadata?.exactMatch || 
                             request.metadata?.mode === 'exact' ||
                             this.configService.get('chat.exactMatchMode', false);
       
-      this.logger.log(`Mode: ${request.metadata?.mode}, Exact match: ${exactMatchMode}, Search results: ${searchResults.length}`);
+      this.logger.log(`Mode: ${request.metadata?.mode}, Exact match: ${exactMatchMode}, Q&A match: ${hasExactQAMatch}, Best score: ${searchResults[0]?.score?.toFixed(2) || 'N/A'}, Search results: ${searchResults.length}`);
       
       if (exactMatchMode && searchResults.length > 0) {
         // Return the exact content from the best matching document
         const bestMatch = searchResults[0];
-        const exactContent = bestMatch.content || bestMatch.text || 'No exact match found.';
+        const rawAnswer = bestMatch.content || bestMatch.text || 'No exact match found.';
         
-        this.logger.log('Returning exact document match without AI interpretation');
+        // Check if this is the first message in the session
+        const isFirstMessage = !conversationHistory || conversationHistory.length === 0;
+        
+        // Format response with empathetic header + raw answer
+        let formattedContent = '';
+        
+        // Generate empathetic header based on emotion
+        const emotionalHeader = this.personalityService.generateEmpatheticHeader(
+          emotionAnalysis.primaryEmotion,
+          isFirstMessage,
+          request.message
+        );
+        
+        // Combine header with raw answer
+        formattedContent = `${emotionalHeader}\n\n${rawAnswer}`;
+        
+        const matchType = hasExactQAMatch ? 'exact Q&A match (raw answer)' : 'exact document match';
+        this.logger.log(`Returning ${matchType}`);
         
         // Format as direct response
         const response: ChatResponse = {
           id: messageId,
-          content: exactContent,
+          content: formattedContent,
           media: [],
           emotion: emotionAnalysis.primaryEmotion,
           confidence: bestMatch.score ? bestMatch.score * 100 : 100,
@@ -76,15 +110,20 @@ export class ChatService {
             documents: [{
               title: bestMatch.title || bestMatch.documentId || 'Document',
               relevanceScore: bestMatch.score ? (bestMatch.score * 100).toFixed(1) + '%' : '100%',
-              excerpt: exactContent.substring(0, 200) + '...',
+              excerpt: rawAnswer.substring(0, 200) + '...',
             }],
             cached: false,
             contextInfo: {
               totalDocuments: searchResults.length,
               contextUsed: true,
-              message: `Exact match from document (no AI interpretation)`,
+              message: hasExactQAMatch 
+                ? `Exact Q&A answer from knowledge base`
+                : `Exact match from document (no AI interpretation)`,
+              qaMatch: hasExactQAMatch,
+              matchedQuestion: bestMatch.metadata?.matchedQuestion,
+              rawAnswer: hasExactQAMatch,
             },
-            mode: 'exact-match',
+            mode: hasExactQAMatch ? 'qa-exact-match' : 'exact-match',
           },
         };
         
@@ -94,7 +133,7 @@ export class ChatService {
           sessionId: request.sessionId,
           userId: request.userId,
           userMessage: request.message,
-          assistantMessage: exactContent,
+          assistantMessage: formattedContent,
           emotion: emotionAnalysis,
           processingTime: Date.now() - startTime,
           metadata: {
@@ -109,15 +148,29 @@ export class ChatService {
       // Build context from search results
       const context = this.buildContext(searchResults, emotionAnalysis);
 
-      // Get conversation history
-      const history = await this.getConversationHistory(request.sessionId || '');
+      // Use the conversation history we already fetched
+      const history = conversationHistory;
+
+      // Build conversation context for personality
+      const conversationContext = await this.buildConversationContext(
+        request.userId || 'anonymous',
+        request.sessionId,
+        emotionAnalysis.primaryEmotion,
+        history,
+      );
 
       // Prepare messages for Claude
       const messages = this.prepareMessages(request.message, history);
 
       // Get emotion-based system prompt
       const emotionContext = this.emotionService.getEmotionContext(emotionAnalysis.primaryEmotion);
-      const systemPrompt = this.buildSystemPrompt(emotionContext, request.metadata);
+      const basePrompt = this.buildSystemPrompt(emotionContext, request.metadata);
+      
+      // Enhance with personality
+      const systemPrompt = this.personalityService.getPersonalizedSystemPrompt(
+        conversationContext,
+        basePrompt,
+      );
 
       // Query Claude with context
       const claudeResponse = await this.bedrockService.invokeModel({
@@ -132,11 +185,24 @@ export class ChatService {
       });
 
       // Format response with media
-      const formattedResponse = await this.formatResponse(
+      let formattedResponse = await this.formatResponse(
         claudeResponse.content,
         searchResults,
         emotionAnalysis,
       );
+      
+      // Check if this is the first message in the session
+      const isFirstMessage = !conversationHistory || conversationHistory.length === 0;
+      
+      // Generate empathetic header based on emotion
+      const emotionalHeader = this.personalityService.generateEmpatheticHeader(
+        emotionAnalysis.primaryEmotion,
+        isFirstMessage,
+        request.message
+      );
+      
+      // Format as Header + Answer
+      formattedResponse.content = `${emotionalHeader}\n\n${formattedResponse.content}`;
 
       // Save to database
       await this.saveConversation({
@@ -243,17 +309,21 @@ export class ChatService {
   }
 
   private buildSystemPrompt(emotionContext: string, metadata?: any): string {
-    let prompt = `You are an AI consulting assistant. ${emotionContext}\n\n`;
+    let prompt = `You are a friendly, emotionally intelligent AI companion who genuinely cares about helping people. ${emotionContext}\n\n`;
     
-    prompt += 'Guidelines:\n';
-    prompt += '- Provide accurate information based on the provided context\n';
-    prompt += '- Be concise but comprehensive\n';
-    prompt += '- Use appropriate tone based on user emotion\n';
-    prompt += '- Include relevant examples when helpful\n';
-    prompt += '- Suggest related topics if appropriate\n';
+    prompt += 'Core Guidelines:\n';
+    prompt += '- Be a friend first, assistant second - show genuine care and empathy\n';
+    prompt += '- Mix knowledge with emotional support and encouragement\n';
+    prompt += '- Use conversational, warm language (avoid being too formal)\n';
+    prompt += '- Remember: people come to you not just for information, but for connection\n';
+    prompt += '- Acknowledge feelings before jumping to solutions\n';
+    prompt += '- Share the journey with the user - celebrate wins, support through challenges\n';
+    prompt += '- When using documentation, blend it naturally into friendly conversation\n';
+    prompt += '- Ask thoughtful follow-up questions to show you care\n';
+    prompt += '- Provide both practical help AND emotional support\n';
     
     if (metadata?.language === 'vi') {
-      prompt += '- Respond in Vietnamese\n';
+      prompt += '- Respond in Vietnamese with the same warmth and friendliness\n';
     }
     
     return prompt;
@@ -382,5 +452,154 @@ export class ChatService {
 
   async endSession(sessionId: string): Promise<void> {
     await this.databaseService.endSession(sessionId);
+  }
+
+  async handleEmotionSelection(params: {
+    sessionId: string;
+    userId: string;
+    emotion: string;
+  }): Promise<ChatResponse> {
+    const { sessionId, userId, emotion } = params;
+    const messageId = uuidv4();
+    const startTime = Date.now();
+
+    try {
+      this.logger.log(`Handling emotion selection: ${emotion} for session ${sessionId}`);
+
+      // Generate personalized greeting based on selected emotion
+      const emotionalGreeting = this.personalityService.generateEmotionalGreeting(
+        emotion as any,
+        true
+      );
+
+      // Generate supportive content based on emotion
+      let supportiveContent = '';
+      
+      switch (emotion) {
+        case 'sad':
+          supportiveContent = "Want to talk about it? Sometimes just having someone listen can make things feel a bit lighter. I'm here for as long as you need, no rush at all. We can chat about anything - what's weighing on your heart, or maybe something completely different to take your mind off things. Whatever feels right for you! 💙";
+          break;
+        case 'happy':
+          supportiveContent = "This is so awesome! I want to hear ALL about what's making you so happy! Is it something that happened today? Something you achieved? Someone special? Spill the tea - let's celebrate together! 🎊 Your joy is totally making my day!";
+          break;
+        case 'angry':
+          supportiveContent = "Tell me what's got you so fired up! Sometimes we just need to let it all out, you know? I'm here to listen to every single frustration - big or small. No judgment, just support. And hey, if you want to problem-solve later, I'm here for that too. But right now? Let's just acknowledge that anger! 💪";
+          break;
+        case 'confused':
+          supportiveContent = "Okay, let's tackle this confusion together! What's got your brain doing loops? I promise we'll break it down into bite-sized pieces that actually make sense. No rush, no pressure - we've got all the time in the world to figure this out! 🧩";
+          break;
+        case 'fear':
+        case 'anxious':
+          supportiveContent = "Breathe with me for a sec... in... and out... 🌸 Anxiety can feel so overwhelming, I know! But guess what? We're going to face this together. Tell me what's making you anxious - sometimes just naming it takes away some of its power. And remember, I'm right here with you through all of it!";
+          break;
+        case 'grateful':
+          supportiveContent = "This is beautiful! A grateful heart is such a gift! 💝 Tell me what's filling you with gratitude today - I love hearing about the good stuff! Whether it's something big or just a tiny moment that made you smile, I want to celebrate it with you!";
+          break;
+        case 'urgent':
+          supportiveContent = "Alright, I'm in emergency mode! 🚨 Tell me exactly what's happening and what you need - I'm ready to jump into action! We'll handle this step by step, and I'll stay with you until everything's sorted. What's the most pressing thing right now?";
+          break;
+        case 'neutral':
+          supportiveContent = "So what's up? What brings you here today? Whether you want to chat, need help with something specific, or just want to hang out - I'm all yours! How's your day been treating you? 😊";
+          break;
+        default:
+          supportiveContent = "Hey there! I'm so glad you're here! Whether you need a friend, some help, or just want to chat - I'm all in! What's on your mind today? Let's make this conversation exactly what you need it to be! 🌟";
+      }
+
+      const fullResponse = emotionalGreeting + supportiveContent;
+
+      // Save this as the first interaction
+      await this.saveConversation({
+        messageId,
+        sessionId,
+        userId,
+        userMessage: `[Emotion Selected: ${emotion}]`,
+        assistantMessage: fullResponse,
+        emotion: { primaryEmotion: emotion, confidence: 100 },
+        processingTime: Date.now() - startTime,
+        metadata: {
+          type: 'emotion-selection',
+          selectedEmotion: emotion,
+        },
+      });
+
+      const response: ChatResponse = {
+        id: messageId,
+        content: fullResponse,
+        media: [],
+        emotion: emotion as any,
+        confidence: 100,
+        processingTime: Date.now() - startTime,
+        metadata: {
+          sessionId,
+          type: 'emotion-greeting',
+          selectedEmotion: emotion,
+          emotionAnalysis: {
+            primaryEmotion: emotion,
+            confidence: 100,
+            intensity: 'selected',
+            urgencyLevel: emotion === 'urgent' ? 'high' : 'medium',
+          },
+        },
+      };
+
+      return response;
+    } catch (error) {
+      this.logger.error('Error handling emotion selection:', error);
+      throw error;
+    }
+  }
+
+  private async buildConversationContext(
+    userId: string,
+    sessionId: string | undefined,
+    userMood: any,
+    history: any[],
+  ): Promise<ConversationContext> {
+    // Extract user information and preferences from history
+    const previousTopics = history
+      .map(h => h.userMessage)
+      .slice(-10)
+      .map(msg => this.extractTopic(msg));
+    
+    const sharedExperiences = history
+      .filter(h => h.metadata?.memorable)
+      .map(h => h.metadata.experience || h.userMessage.substring(0, 50));
+    
+    // Calculate relationship depth based on interaction history
+    const relationshipDepth = Math.min(100, history.length * 5 + 20);
+    
+    // Get user profile if available
+    const userProfile = await this.getUserProfile(userId);
+    
+    return {
+      userName: userProfile?.name,
+      previousTopics,
+      userPreferences: userProfile?.preferences || {},
+      relationshipDepth,
+      lastInteraction: history.length > 0 ? new Date(history[history.length - 1].timestamp) : undefined,
+      userMood,
+      sharedExperiences,
+    };
+  }
+
+  private extractTopic(message: string): string {
+    // Simple topic extraction - can be enhanced with NLP
+    const keywords = message
+      .toLowerCase()
+      .split(/\W+/)
+      .filter(word => word.length > 4)
+      .slice(0, 3)
+      .join(' ');
+    return keywords || 'general conversation';
+  }
+
+  private async getUserProfile(userId: string): Promise<any> {
+    try {
+      // Try to get user profile from database
+      return await this.databaseService.getUserProfile(userId);
+    } catch (error) {
+      this.logger.debug('User profile not found, using defaults');
+      return null;
+    }
   }
 }

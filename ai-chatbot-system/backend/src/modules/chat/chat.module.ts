@@ -8,6 +8,7 @@ import { EmotionModule } from '../emotion/emotion.module';
 import { SearchModule } from '../search/search.module';
 import { DatabaseModule } from '../database/database.module';
 import { CacheModule } from '../cache/cache.module';
+import { PersonalityModule } from '../personality/personality.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { CacheModule } from '../cache/cache.module';
     SearchModule,
     DatabaseModule,
     CacheModule,
+    PersonalityModule,
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway],

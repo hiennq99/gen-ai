@@ -46,6 +46,15 @@ export const chatService = {
     return response.data;
   },
 
+  async selectEmotion(sessionId: string, userId: string, emotion: string) {
+    const response = await api.post<ChatResponse>('/chat/session/emotion', {
+      sessionId,
+      userId,
+      emotion,
+    });
+    return response.data;
+  },
+
   async endSession(sessionId: string) {
     const response = await api.post(`/chat/session/${sessionId}/end`);
     return response.data;

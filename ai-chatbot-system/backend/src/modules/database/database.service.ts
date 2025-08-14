@@ -491,4 +491,116 @@ export class DatabaseService implements OnModuleInit {
     const response = await this.docClient.send(command);
     return response.Item;
   }
+
+  async getUserProfile(userId: string) {
+    // Use in-memory storage if DynamoDB is not configured
+    if (!this.isConfigured) {
+      const users = this.inMemoryStore.get('users') || [];
+      const user = users.find((u: any) => u.id === userId);
+      
+      if (!user) {
+        // Create a default profile for new users
+        const newUser = {
+          id: userId,
+          name: null,
+          preferences: {
+            language: 'en',
+            communicationStyle: 'friendly',
+            interests: [],
+          },
+          relationshipData: {
+            firstInteraction: new Date().toISOString(),
+            totalInteractions: 0,
+            favoriteTopics: [],
+            personalNotes: [],
+          },
+          createdAt: Date.now(),
+        };
+        users.push(newUser);
+        this.inMemoryStore.set('users', users);
+        return newUser;
+      }
+      
+      return user;
+    }
+    
+    try {
+      const command = new GetCommand({
+        TableName: this.tables.users,
+        Key: { id: userId },
+      });
+      
+      const response = await this.docClient.send(command);
+      
+      if (!response.Item) {
+        // Create default profile for new user
+        const newUser = {
+          id: userId,
+          name: null,
+          preferences: {
+            language: 'en',
+            communicationStyle: 'friendly',
+            interests: [],
+          },
+          relationshipData: {
+            firstInteraction: new Date().toISOString(),
+            totalInteractions: 0,
+            favoriteTopics: [],
+            personalNotes: [],
+          },
+          createdAt: Date.now(),
+          createdAtISO: new Date().toISOString(),
+        };
+        
+        await this.saveUser(newUser);
+        return newUser;
+      }
+      
+      return response.Item;
+    } catch (error) {
+      this.logger.error('Error getting user profile:', error);
+      // Return a default profile on error
+      return {
+        id: userId,
+        name: null,
+        preferences: {},
+        relationshipData: {},
+      };
+    }
+  }
+
+  async updateUserProfile(userId: string, updates: any) {
+    if (!this.isConfigured) {
+      const users = this.inMemoryStore.get('users') || [];
+      const userIndex = users.findIndex((u: any) => u.id === userId);
+      
+      if (userIndex !== -1) {
+        users[userIndex] = { ...users[userIndex], ...updates };
+        this.inMemoryStore.set('users', users);
+      }
+      
+      return { success: true };
+    }
+    
+    try {
+      const command = new UpdateCommand({
+        TableName: this.tables.users,
+        Key: { id: userId },
+        UpdateExpression: 'SET #data = :data, updatedAt = :updatedAt',
+        ExpressionAttributeNames: {
+          '#data': 'profileData',
+        },
+        ExpressionAttributeValues: {
+          ':data': updates,
+          ':updatedAt': new Date().toISOString(),
+        },
+      });
+      
+      await this.docClient.send(command);
+      return { success: true };
+    } catch (error) {
+      this.logger.error('Error updating user profile:', error);
+      return { success: false, error };
+    }
+  }
 }

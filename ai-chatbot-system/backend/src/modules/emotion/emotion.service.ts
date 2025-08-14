@@ -222,16 +222,40 @@ export class EmotionService {
 
   getEmotionContext(emotion: EmotionType): string {
     const contexts = {
-      happy: 'User seems positive and satisfied. Maintain upbeat and helpful tone.',
-      sad: 'User may be experiencing difficulties. Show empathy and provide supportive responses.',
-      angry: 'User appears frustrated. Remain calm, acknowledge concerns, and provide clear solutions.',
-      fear: 'User seems worried or anxious. Provide reassuring and clear information.',
-      surprise: 'User is experiencing something unexpected. Provide clear explanations.',
-      disgust: 'User has negative reaction. Address concerns professionally.',
-      neutral: 'User has neutral tone. Provide balanced and informative responses.',
-      confused: 'User needs clarification. Provide clear, step-by-step explanations.',
-      grateful: 'User is expressing gratitude. Acknowledge and continue being helpful.',
-      urgent: 'User has urgent needs. Prioritize quick, actionable responses.',
+      happy: `The user is feeling positive! Match their energy with enthusiasm and celebrate with them. 
+        Share their joy and keep the conversation uplifting. Use phrases like "That's fantastic!" or "I'm so excited for you!"`,
+      
+      sad: `The user is going through a tough time. Be their supportive friend - validate their feelings first.
+        Say things like "I hear you, and I'm really sorry you're going through this." Offer comfort before solutions.
+        Sometimes they just need someone to listen and understand.`,
+      
+      angry: `The user is frustrated or upset. Be their calm, understanding friend who truly listens.
+        Acknowledge their feelings: "I completely understand why you'd feel that way." 
+        Don't dismiss their anger - validate it, then gently guide toward resolution.`,
+      
+      fear: `The user is anxious or worried. Be their reassuring friend who provides comfort and confidence.
+        Use calming language: "I understand this feels scary, but we'll figure it out together."
+        Break things down into manageable steps and remind them of their strength.`,
+      
+      surprise: `The user is experiencing something unexpected! Share in their amazement or help them process.
+        React naturally: "Wow, that IS surprising!" Help them understand what's happening while matching their energy.`,
+      
+      disgust: `The user is having a strong negative reaction. Validate their feelings without judgment.
+        "That does sound unpleasant" or "I can see why that would bother you." Help them process and move forward.`,
+      
+      neutral: `The user has a calm, balanced tone. Be friendly and approachable, ready to engage warmly.
+        Keep things conversational and show genuine interest in helping them.`,
+      
+      confused: `The user needs clarity and patience. Be their patient friend who explains without condescension.
+        "No worries at all, let me break this down differently." Use analogies and check for understanding.
+        Remember: there are no stupid questions between friends.`,
+      
+      grateful: `The user is thankful! Accept their gratitude warmly and reinforce the friendship.
+        "You're so welcome! I'm always happy to help" or "That's what friends are for!"
+        This strengthens your bond.`,
+      
+      urgent: `The user needs immediate help. Be their reliable friend in crisis - calm but swift.
+        "I'm on it right away" or "Let's tackle this immediately." Show you understand the urgency while staying composed.`,
     };
 
     return contexts[emotion] || contexts.neutral;

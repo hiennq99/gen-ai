@@ -75,4 +75,32 @@ export default () => ({
     maxConcurrentRequests: parseInt(process.env.MAX_CONCURRENT_REQUESTS || '100', 10),
     cacheEnabled: process.env.CACHE_ENABLED === 'true',
   },
+  
+  chat: {
+    // Exact matching configuration
+    exactMatch: {
+      enabled: process.env.CHAT_EXACT_MATCH_ENABLED !== 'false', // Default true
+      threshold: parseFloat(process.env.CHAT_EXACT_MATCH_THRESHOLD || '0.9'),
+      priorityMode: process.env.CHAT_PRIORITY_MODE || 'qa_first', // 'qa_first' | 'ai_only' | 'hybrid'
+      autoReturn: process.env.CHAT_AUTO_RETURN_EXACT !== 'false', // Default true
+    },
+    
+    // Response modes
+    responseMode: {
+      default: process.env.CHAT_RESPONSE_MODE || 'hybrid', // 'exact' | 'ai' | 'hybrid'
+      allowUserOverride: process.env.CHAT_ALLOW_MODE_OVERRIDE !== 'false',
+    },
+    
+    // AI personality configuration
+    personality: {
+      enabled: process.env.CHAT_PERSONALITY_ENABLED !== 'false',
+      warmth: parseInt(process.env.CHAT_PERSONALITY_WARMTH || '85', 10),
+      empathy: parseInt(process.env.CHAT_PERSONALITY_EMPATHY || '90', 10),
+      humor: parseInt(process.env.CHAT_PERSONALITY_HUMOR || '70', 10),
+      supportiveness: parseInt(process.env.CHAT_PERSONALITY_SUPPORT || '95', 10),
+      enthusiasm: parseInt(process.env.CHAT_PERSONALITY_ENTHUSIASM || '80', 10),
+      emojiEnabled: process.env.CHAT_EMOJI_ENABLED !== 'false',
+      emojiFrequency: process.env.CHAT_EMOJI_FREQUENCY || 'moderate',
+    },
+  },
 });

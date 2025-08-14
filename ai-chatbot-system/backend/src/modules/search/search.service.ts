@@ -185,10 +185,11 @@ export class SearchService implements OnModuleInit {
     emotion?: string;
     limit?: number;
     minScore?: number;
+    exactMatchFirst?: boolean;
   }) {
-    const { query, emotion, limit = 10, minScore = 0.5 } = params;
+    const { query, emotion, limit = 10, minScore = 0.5, exactMatchFirst = true } = params;
 
-    this.logger.log(`Searching for: "${query}" with limit: ${limit}`);
+    this.logger.log(`Searching for: "${query}" with limit: ${limit}, exactMatchFirst: ${exactMatchFirst}`);
 
     try {
       // Check if OpenSearch is available
@@ -301,10 +302,20 @@ export class SearchService implements OnModuleInit {
     emotion?: string;
     limit?: number;
     minScore?: number;
+    exactMatchFirst?: boolean;
   }) {
-    const { query, limit = 10 } = params;
+    const { query, emotion, limit = 10, exactMatchFirst = true } = params;
     
     try {
+      // First, try to find exact Q&A matches with emotion filtering
+      if (exactMatchFirst) {
+        const exactMatch = await this.findExactQAMatch(query, emotion);
+        if (exactMatch) {
+          this.logger.log(`Found Q&A match for: "${query}" with emotion: ${emotion}`);
+          return [exactMatch];
+        }
+      }
+      
       // Get all documents from database
       const documents = await this.databaseService.getAllDocuments();
       
@@ -452,5 +463,115 @@ export class SearchService implements OnModuleInit {
       this.logger.error("Error indexing conversation:", error);
       return { indexed: false, error: error.message };
     }
+  }
+
+  // Find exact Q&A match with emotion filtering
+  private async findExactQAMatch(query: string, emotion?: string): Promise<any> {
+    try {
+      // Get Q&A training data
+      const qaData = await this.databaseService.getTrainingData();
+      
+      if (!qaData || qaData.length === 0) {
+        return null;
+      }
+      
+      // Normalize query for comparison
+      const normalizedQuery = this.normalizeText(query);
+      
+      // First, try to find matches with the same emotion
+      let bestMatch = null;
+      let bestScore = 0;
+      
+      for (const qa of qaData) {
+        const normalizedQuestion = this.normalizeText(qa.question || '');
+        let score = 0;
+        
+        // Check for exact match
+        if (normalizedQuestion === normalizedQuery) {
+          score = 1.0;
+        } else {
+          // Check for high similarity match
+          score = this.calculateSimilarity(normalizedQuery, normalizedQuestion);
+        }
+        
+        // Apply emotion bonus if emotions match
+        if (emotion && qa.emotion) {
+          if (qa.emotion === emotion) {
+            score *= 1.2; // 20% bonus for matching emotion
+          } else if (this.areEmotionsRelated(qa.emotion, emotion)) {
+            score *= 1.1; // 10% bonus for related emotions
+          }
+        }
+        
+        // Check if this is our best match so far
+        const threshold = this.configService.get<number>('chat.exactMatch.threshold', 0.9);
+        if (score >= threshold && score > bestScore) {
+          bestScore = score;
+          bestMatch = {
+            documentId: qa.id,
+            title: qa.question,
+            content: qa.answer,
+            text: qa.answer,
+            score: Math.min(score, 1.0), // Cap at 1.0
+            metadata: {
+              type: score >= 0.9 ? 'qa_exact_match' : score >= 0.65 ? 'qa_high_match' : 'qa_match',
+              emotion: qa.emotion || 'neutral',
+              category: qa.category,
+              matchedQuestion: qa.question,
+              emotionMatch: qa.emotion === emotion,
+            },
+          };
+        }
+      }
+      
+      return bestMatch;
+    } catch (error) {
+      this.logger.error('Error finding exact Q&A match:', error);
+      return null;
+    }
+  }
+  
+  // Check if emotions are related (for better matching)
+  private areEmotionsRelated(emotion1: string, emotion2: string): boolean {
+    const emotionGroups = {
+      negative: ['sad', 'angry', 'fear', 'disgust', 'stressed'],
+      positive: ['happy', 'grateful', 'excited'],
+      confused: ['confused', 'uncertain'],
+      neutral: ['neutral', 'calm'],
+    };
+    
+    for (const group of Object.values(emotionGroups)) {
+      if (group.includes(emotion1) && group.includes(emotion2)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  // Normalize text for comparison
+  private normalizeText(text: string): string {
+    return text
+      .toLowerCase()
+      .replace(/[^\w\s]/g, '') // Remove punctuation
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim();
+  }
+
+  // Calculate similarity between two strings
+  private calculateSimilarity(str1: string, str2: string): number {
+    const words1 = str1.split(' ');
+    const words2 = str2.split(' ');
+    
+    const set1 = new Set(words1);
+    const set2 = new Set(words2);
+    
+    const intersection = new Set([...set1].filter(x => set2.has(x)));
+    const union = new Set([...set1, ...set2]);
+    
+    if (union.size === 0) return 0;
+    
+    // Jaccard similarity
+    return intersection.size / union.size;
   }
 }
