@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useChatStore } from '@/store/chatStore';
-import { Plus, MessageSquare, Trash2, X, Clock } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, X, Clock, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -12,17 +12,49 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
-  const { sessions, currentSessionId, createSession, setCurrentSession, deleteSession } = useChatStore();
+  const { 
+    sessions, 
+    currentSessionId, 
+    createSession, 
+    setCurrentSession, 
+    deleteSession,
+    fetchSessions,
+    loadSession,
+    isLoading 
+  } = useChatStore();
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Fetch sessions on component mount
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
 
   const handleNewChat = () => {
     createSession();
     onClose();
   };
 
-  const handleSelectSession = (sessionId: string) => {
-    setCurrentSession(sessionId);
-    onClose();
+  const handleSelectSession = async (sessionId: string) => {
+    // Check if we're already on this session
+    if (currentSessionId === sessionId) {
+      onClose();
+      return;
+    }
+    
+    // Load the session data
+    await loadSession(sessionId);
+    
+    // Close sidebar on mobile
+    if (window.innerWidth < 1024) {
+      onClose();
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchSessions();
+    setIsRefreshing(false);
   };
 
   return (
@@ -41,11 +73,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
       </AnimatePresence>
 
       {/* Sidebar */}
-      <motion.aside
-        initial={{ x: -320 }}
-        animate={{ x: isOpen ? 0 : -320 }}
-        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-        className={`fixed lg:relative inset-y-0 left-0 z-50 w-80 bg-white border-r border-gray-200 flex flex-col ${
+      <aside
+        className={`fixed lg:sticky top-0 inset-y-0 left-0 z-50 w-80 bg-white border-r border-gray-200 flex flex-col h-screen transition-transform duration-300 ${
           isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
@@ -53,12 +82,22 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         <div className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-800">Chat History</h2>
-            <button
-              onClick={onClose}
-              className="lg:hidden p-1 hover:bg-gray-100 rounded"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing || isLoading}
+                className="p-1 hover:bg-gray-100 rounded transition-colors"
+                title="Refresh sessions"
+              >
+                <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              </button>
+              <button
+                onClick={onClose}
+                className="lg:hidden p-1 hover:bg-gray-100 rounded"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
           
           <button
@@ -72,7 +111,12 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
         {/* Sessions List */}
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {sessions.length === 0 ? (
+          {isLoading && sessions.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <RefreshCw className="w-12 h-12 mx-auto mb-3 text-gray-300 animate-spin" />
+              <p className="text-sm">Loading conversations...</p>
+            </div>
+          ) : sessions.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <MessageSquare className="w-12 h-12 mx-auto mb-3 text-gray-300" />
               <p className="text-sm">No conversations yet</p>
@@ -84,10 +128,10 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                 key={session.id}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className={`group relative p-3 rounded-lg cursor-pointer transition-colors ${
+                className={`group relative p-3 rounded-lg cursor-pointer transition-all ${
                   currentSessionId === session.id
-                    ? 'bg-primary-50 border border-primary-200'
-                    : 'hover:bg-gray-50'
+                    ? 'bg-primary-50 border-2 border-primary-400 shadow-sm'
+                    : 'hover:bg-gray-50 border-2 border-transparent'
                 }`}
                 onClick={() => handleSelectSession(session.id)}
                 onMouseEnter={() => setHoveredSession(session.id)}
@@ -105,7 +149,22 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                     )}
                     <div className="flex items-center gap-1 mt-2 text-xs text-gray-400">
                       <Clock className="w-3 h-3" />
-                      {format(new Date(session.updatedAt), 'MMM d, HH:mm')}
+                      {(() => {
+                        try {
+                          const date = session.updatedAt instanceof Date 
+                            ? session.updatedAt 
+                            : new Date(session.updatedAt);
+                          
+                          // Check if date is valid
+                          if (isNaN(date.getTime())) {
+                            return 'Recently';
+                          }
+                          
+                          return format(date, 'MMM d, HH:mm');
+                        } catch (error) {
+                          return 'Recently';
+                        }
+                      })()}
                     </div>
                   </div>
                   
@@ -130,7 +189,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         <div className="p-4 border-t border-gray-200 text-xs text-gray-500 text-center">
           Powered by Claude AI
         </div>
-      </motion.aside>
+      </aside>
     </>
   );
 }

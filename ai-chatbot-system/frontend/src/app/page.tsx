@@ -6,7 +6,7 @@ import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 
 export default function Home() {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true); // Default to open on desktop
 
   return (
     <div className="flex h-screen bg-gray-50">

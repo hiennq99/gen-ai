@@ -11,7 +11,7 @@ import { useChat } from '@/hooks/useChat';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function ChatInterface() {
-  const { currentSession, isTyping } = useChatStore();
+  const { currentSession, isTyping, isLoading, currentSessionId } = useChatStore();
   const { sendMessage, isConnected } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [responseMode, setResponseMode] = useState<'exact' | 'ai' | 'hybrid'>('ai');
@@ -24,6 +24,13 @@ export default function ChatInterface() {
     scrollToBottom();
   }, [currentSession?.messages]);
 
+  // Reset scroll position when session changes
+  useEffect(() => {
+    if (currentSessionId) {
+      scrollToBottom();
+    }
+  }, [currentSessionId]);
+
   const handleSendMessage = async (content: string) => {
     await sendMessage(content, { mode: responseMode });
   };
@@ -31,6 +38,18 @@ export default function ChatInterface() {
   const handleModeChange = (mode: 'exact' | 'ai' | 'hybrid') => {
     setResponseMode(mode);
   };
+
+  // Show loading state when switching sessions
+  if (isLoading && !currentSession) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading conversation...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentSession || currentSession.messages.length === 0) {
     return <EmptyState />;

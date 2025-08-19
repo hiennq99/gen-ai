@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
+import { conversationService } from '@/lib/conversationService';
 
 export interface Message {
   id: string;
@@ -56,6 +57,8 @@ interface ChatStore {
   clearSessions: () => void;
   setLoading: (loading: boolean) => void;
   setTyping: (typing: boolean) => void;
+  fetchSessions: (userId?: string) => Promise<void>;
+  loadSession: (sessionId: string) => Promise<void>;
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -70,7 +73,7 @@ export const useChatStore = create<ChatStore>()(
       createSession: (title?: string) => {
         const newSession: ChatSession = {
           id: uuidv4(),
-          title: title || 'New Chat',
+          title: title || 'New Conversation',  // Will be updated with first message
           messages: [],
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -125,6 +128,11 @@ export const useChatStore = create<ChatStore>()(
             messages: [...state.currentSession.messages, newMessage],
             updatedAt: new Date(),
           };
+
+          // Update session title with first user message
+          if (message.role === 'user' && state.currentSession.messages.length === 0) {
+            updatedSession.title = message.content.substring(0, 100) || 'New Chat';
+          }
 
           return {
             ...state,
@@ -188,6 +196,145 @@ export const useChatStore = create<ChatStore>()(
 
       setTyping: (typing: boolean) => {
         set({ isTyping: typing });
+      },
+
+      fetchSessions: async (userId?: string) => {
+        try {
+          set({ isLoading: true });
+          const conversations = await conversationService.getAllConversations({ userId });
+          
+          // Check if conversations is an array
+          if (!Array.isArray(conversations)) {
+            console.warn('No conversations found or invalid response');
+            set({ sessions: [], isLoading: false });
+            return;
+          }
+          
+          // Transform backend conversations to local session format
+          const sessions: ChatSession[] = conversations
+            .filter((conv: any) => conv && conv.sessionId) // Filter out invalid entries
+            .map((conv: any) => {
+              const createdAt = conv.createdAt ? new Date(conv.createdAt) : new Date();
+              const updatedAt = conv.updatedAt ? new Date(conv.updatedAt) : createdAt;
+              
+              return {
+                id: conv.sessionId,
+                title: conv.userMessage ? 
+                  (conv.userMessage.length > 50 ? 
+                    conv.userMessage.substring(0, 50) + '...' : 
+                    conv.userMessage) : 
+                  'Chat Session',
+                messages: [
+                  {
+                    id: conv.messageId || uuidv4(),
+                    role: 'user' as const,
+                    content: conv.userMessage || '',
+                    timestamp: createdAt,
+                    emotion: conv.emotion?.primaryEmotion,
+                    confidence: conv.emotion?.confidence,
+                  },
+                  {
+                    id: uuidv4(),
+                    role: 'assistant' as const,
+                    content: conv.assistantMessage || '',
+                    timestamp: createdAt,
+                    metadata: conv.metadata,
+                  }
+                ],
+                createdAt,
+                updatedAt,
+              };
+            });
+
+          // Group messages by session
+          const sessionMap = new Map<string, ChatSession>();
+          sessions.forEach(session => {
+            if (sessionMap.has(session.id)) {
+              const existing = sessionMap.get(session.id)!;
+              existing.messages.push(...session.messages);
+              existing.updatedAt = session.updatedAt > existing.updatedAt ? session.updatedAt : existing.updatedAt;
+            } else {
+              sessionMap.set(session.id, session);
+            }
+          });
+
+          const groupedSessions = Array.from(sessionMap.values())
+            .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+
+          set({ sessions: groupedSessions, isLoading: false });
+        } catch (error) {
+          console.error('Error fetching sessions:', error);
+          set({ isLoading: false });
+        }
+      },
+
+      loadSession: async (sessionId: string) => {
+        try {
+          set({ isLoading: true });
+          const conversation = await conversationService.getConversation(sessionId);
+          
+          if (conversation) {
+            // Transform to local session format
+            const messages: Message[] = [];
+            
+            if (Array.isArray(conversation)) {
+              conversation.forEach((msg: any) => {
+                messages.push({
+                  id: uuidv4(),
+                  role: 'user' as const,
+                  content: msg.userMessage,
+                  timestamp: new Date(msg.createdAt),
+                  emotion: msg.emotion?.primaryEmotion,
+                  confidence: msg.emotion?.confidence,
+                });
+                messages.push({
+                  id: uuidv4(),
+                  role: 'assistant' as const,
+                  content: msg.assistantMessage,
+                  timestamp: new Date(msg.createdAt),
+                  metadata: msg.metadata,
+                });
+              });
+            }
+
+            // Find first user message for title
+            const firstUserMessage = messages.find(m => m.role === 'user');
+            const sessionTitle = firstUserMessage?.content ? 
+              (firstUserMessage.content.length > 50 ? 
+                firstUserMessage.content.substring(0, 50) + '...' : 
+                firstUserMessage.content) : 
+              'Chat Session';
+
+            const session: ChatSession = {
+              id: sessionId,
+              title: sessionTitle,
+              messages,
+              createdAt: messages[0]?.timestamp || new Date(),
+              updatedAt: messages[messages.length - 1]?.timestamp || new Date(),
+            };
+
+            set((state) => {
+              const existingIndex = state.sessions.findIndex(s => s.id === sessionId);
+              const newSessions = [...state.sessions];
+              
+              if (existingIndex >= 0) {
+                newSessions[existingIndex] = session;
+              } else {
+                newSessions.unshift(session);
+              }
+
+              return {
+                sessions: newSessions,
+                currentSessionId: sessionId,
+                currentSession: session,
+                isLoading: false,
+              };
+            });
+          }
+        } catch (error) {
+          console.error('Error loading session:', error);
+          set({ isLoading: false });
+        }
       },
     }),
     {

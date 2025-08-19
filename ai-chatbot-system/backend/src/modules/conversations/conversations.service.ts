@@ -41,34 +41,12 @@ export class ConversationsService {
   async getConversation(sessionId: string) {
     const history = await this.databaseService.getConversationHistory(sessionId);
     
-    if (history.length === 0) {
-      return null;
+    if (!history || history.length === 0) {
+      return [];
     }
 
-    // Build full conversation with messages
-    const messages = history.map((h: any) => [
-      {
-        role: 'user',
-        content: h.userMessage,
-        timestamp: h.createdAt,
-        emotion: h.emotion?.primaryEmotion,
-      },
-      {
-        role: 'assistant',
-        content: h.assistantMessage,
-        timestamp: new Date(new Date(h.createdAt).getTime() + (h.processingTime || 1000)).toISOString(),
-        confidence: h.confidence,
-      },
-    ]).flat();
-
-    return {
-      sessionId,
-      userId: history[0].userId,
-      messages,
-      startedAt: history[0].createdAt,
-      endedAt: history[history.length - 1].createdAt,
-      messageCount: messages.length,
-    };
+    // Return raw history for frontend to process
+    return history;
   }
 
   async exportConversations(filters: any) {
