@@ -9,6 +9,10 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    exclude: [],
+    force: true,
+  },
   server: {
     port: 5173,
     proxy: {
