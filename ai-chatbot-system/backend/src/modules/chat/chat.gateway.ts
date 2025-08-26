@@ -13,7 +13,14 @@ import { ChatService } from './chat.service';
 
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: [
+      'http://localhost:5173', 
+      'http://localhost:3001', 
+      'http://localhost:3002',
+      'http://13.239.138.122:3001',  // ✅ Add your public IP
+      'http://13.239.138.122:5173'
+    ],
+    credentials: true,
   },
   namespace: '/chat',
 })
