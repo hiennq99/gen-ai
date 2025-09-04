@@ -108,7 +108,7 @@ services:
     ports:
       - "5173:5173"
     environment:
-      - VITE_API_URL=http://${PUBLIC_IP:-localhost}:3000/api/v1
+      - VITE_API_URL=https://m2m.portal-syncsoft.com/api/v1
     depends_on:
       - backend
     networks:
