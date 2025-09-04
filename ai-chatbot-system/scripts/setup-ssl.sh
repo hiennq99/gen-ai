@@ -24,9 +24,7 @@ sudo certbot certonly --standalone \
     --email $EMAIL \
     --agree-tos \
     --no-eff-email \
-    -d $DOMAIN \
-    -d www.$DOMAIN \
-    -d admin.$DOMAIN
+    -d $DOMAIN
 
 # Start nginx
 sudo systemctl start nginx
