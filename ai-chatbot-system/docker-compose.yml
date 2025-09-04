@@ -85,7 +85,7 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=https://m2m.portal-syncsoft.com/api
+      - NEXT_PUBLIC_API_URL=https://m2m.portal-syncsoft.com/api/v1
       - NEXT_PUBLIC_WS_URL=wss://m2m.portal-syncsoft.com
     depends_on:
       - backend
