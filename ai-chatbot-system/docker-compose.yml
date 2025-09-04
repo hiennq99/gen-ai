@@ -60,7 +60,7 @@ services:
       dockerfile: Dockerfile.dev
     container_name: ai-chatbot-frontend
     ports:
-      - "3001:3001"
+      - "3001:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://${PUBLIC_IP}:3000/api/v1
       - NEXT_PUBLIC_WS_URL=ws://${PUBLIC_IP}:3000
@@ -80,10 +80,10 @@ services:
   frontend-production:
     build:
       context: ./frontend
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
     container_name: ai-chatbot-frontend
     ports:
-      - "3001:3001"
+      - "3001:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://${PUBLIC_IP}:3000/api/v1
       - NEXT_PUBLIC_WS_URL=ws://${PUBLIC_IP}:3000
