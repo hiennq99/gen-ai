@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import {
   Card,
   Table,
@@ -77,7 +77,7 @@ export default function Documents() {
           message.success(`Successfully deleted ${selectedRowKeys.length} document(s)`);
           setSelectedRowKeys([]);
           queryClient.invalidateQueries({ queryKey: ['documents'] });
-        } catch (error) {
+        } catch {
           message.error('Failed to delete some documents');
         }
       },

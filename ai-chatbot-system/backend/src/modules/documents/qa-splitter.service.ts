@@ -51,7 +51,7 @@ export class QASplitterService {
       return null;
     }
 
-    return matches.map((match, index) => ({
+    return matches.map((match, _index) => ({
       question: match[3].trim(),
       answer: match[4].trim(),
       metadata: {

@@ -1,5 +1,6 @@
-import { Controller, Post, Body, Get, Param, Query, Delete } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Controller, Post, Body, Get, Param, Query, Delete, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { TrainingService } from './training.service';
 
 @ApiTags('training')
@@ -37,6 +38,45 @@ export class TrainingController {
     return await this.trainingService.getTrainingStatus(jobId);
   }
 
+  @Post('upload-csv')
+  @ApiOperation({ summary: 'Upload CSV file with question/answer pairs for training' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'CSV file with question and answer columns',
+        },
+        name: {
+          type: 'string',
+          description: 'Training job name',
+        },
+        description: {
+          type: 'string',
+          description: 'Training job description',
+        },
+        questionColumn: {
+          type: 'string',
+          description: 'Column name for questions (default: "question")',
+        },
+        answerColumn: {
+          type: 'string',
+          description: 'Column name for answers (default: "answer")',
+        },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadCSV(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: any,
+  ) {
+    return await this.trainingService.uploadCSV(file, body);
+  }
+
   @Post(':jobId/stop')
   @ApiOperation({ summary: 'Stop training job' })
   async stopTraining(@Param('jobId') jobId: string) {
@@ -47,5 +87,11 @@ export class TrainingController {
   @ApiOperation({ summary: 'Delete training data' })
   async deleteTrainingData(@Param('id') id: string) {
     return await this.trainingService.deleteTrainingData(id);
+  }
+
+  @Delete('qa/all')
+  @ApiOperation({ summary: 'Clear all Q&A training data' })
+  async clearAllQAData() {
+    return await this.trainingService.clearAllQAData();
   }
 }

@@ -10,7 +10,7 @@ interface ChatSettingsProps {
 
 export default function ChatSettings({ onModeChange }: ChatSettingsProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [mode, setMode] = useState<'exact' | 'ai' | 'hybrid'>('ai');
+  const [mode, setMode] = useState<'exact' | 'ai' | 'hybrid'>('hybrid');
 
   const handleModeChange = (newMode: 'exact' | 'ai' | 'hybrid') => {
     setMode(newMode);

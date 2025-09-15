@@ -132,7 +132,7 @@ export class PersonalityService {
   ): string {
     const emotionalContext = this.emotionalResponses[context.userMood] || this.emotionalResponses.neutral;
     
-    let enhancedPrompt = `You are a warm, caring, and emotionally intelligent AI friend. Your personality traits:
+    const enhancedPrompt = `You are a warm, caring, and emotionally intelligent AI friend. Your personality traits:
 - Warmth: Very high - always friendly and welcoming
 - Empathy: Exceptional - deeply understand and validate feelings
 - Humor: Moderate - use light humor when appropriate to brighten the mood
@@ -176,7 +176,6 @@ Balance professionalism with genuine warmth and care. Make every interaction fee
     context: ConversationContext,
   ): string {
     // Add personal touches based on emotion
-    const emotionalContext = this.emotionalResponses[emotion] || this.emotionalResponses.neutral;
     
     // Prepend a friendly opener if appropriate
     const opener = this.getContextualOpener(emotion, context);
@@ -220,7 +219,7 @@ Balance professionalism with genuine warmth and care. Make every interaction fee
     return `${days} days ago`;
   }
 
-  private getContextualOpener(emotion: EmotionType, context: ConversationContext): string {
+  private getContextualOpener(emotion: EmotionType, _context: ConversationContext): string {
     if (emotion === 'sad' || emotion === 'angry') {
       return this.friendlyPhrases.empathetic[Math.floor(Math.random() * this.friendlyPhrases.empathetic.length)] + ".";
     }
@@ -354,7 +353,7 @@ I'll use this context to provide more personalized and relevant responses.`;
   }
 
   // Generate friendly intro for Q&A answers (without referencing the question)
-  generateFriendlyQAIntro(emotion: EmotionType, question: string): string {
+  generateFriendlyQAIntro(emotion: EmotionType, _question: string): string {
     const intros = {
       happy: [
         "I'm so happy to help! 😊",
@@ -484,7 +483,7 @@ I'll use this context to provide more personalized and relevant responses.`;
   }
 
   // Generate empathetic header for responses
-  generateEmpatheticHeader(emotion: EmotionType, isFirstMessage: boolean = false, question: string = ''): string {
+  generateEmpatheticHeader(emotion: EmotionType, isFirstMessage: boolean = false, _question: string = ''): string {
     // Define empathetic headers for each emotion
     const headers = {
       happy: [

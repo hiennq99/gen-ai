@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand, UpdateCommand, DeleteCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, DeleteCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 
 @Injectable()
 export class DatabaseService implements OnModuleInit {
@@ -27,6 +27,7 @@ export class DatabaseService implements OnModuleInit {
     this.inMemoryStore.set('training', []);
     this.inMemoryStore.set('users', []);
     this.inMemoryStore.set('sessions', []);
+    this.inMemoryStore.set('qa', []);
 
     const clientConfig: any = {
       region: region || 'us-east-1',
@@ -417,31 +418,97 @@ export class DatabaseService implements OnModuleInit {
 
   async getTrainingData(query?: any) {
     try {
+      if (!this.isConfigured) {
+        // Use in-memory store - combine both training and qa data
+        const trainingItems = this.inMemoryStore.get('training') || [];
+        const qaItems = this.inMemoryStore.get('qa') || [];
+
+        // Convert Q&A items to training format and combine with regular training data
+        const combinedItems = [
+          ...trainingItems,
+          ...qaItems.map((qaItem: any) => ({
+            ...qaItem,
+            type: 'qa',
+            source: 'csv_upload'
+          }))
+        ];
+
+        return combinedItems;
+      }
+
       const command = new ScanCommand({
         TableName: this.tables.training,
         Limit: query?.limit || 100,
       });
-      
+
       const response = await this.docClient.send(command);
       return response.Items || [];
     } catch (error: any) {
       if (error.name === 'ResourceNotFoundException') {
         this.logger.warn('Training table does not exist yet');
-        return [];
+        // Fall back to in-memory store
+        const trainingItems = this.inMemoryStore.get('training') || [];
+        const qaItems = this.inMemoryStore.get('qa') || [];
+
+        return [
+          ...trainingItems,
+          ...qaItems.map((qaItem: any) => ({
+            ...qaItem,
+            type: 'qa',
+            source: 'csv_upload'
+          }))
+        ];
       }
       this.logger.error('Error fetching training data:', error);
       return [];
     }
   }
 
+  async saveQAData(qaData: any) {
+    try {
+      if (!this.isConfigured) {
+        // Fall back to in-memory store
+        const qaItems = this.inMemoryStore.get('qa') || [];
+        qaItems.push(qaData);
+        this.inMemoryStore.set('qa', qaItems);
+        return { success: true };
+      }
+
+      const command = new PutCommand({
+        TableName: this.tables.training,
+        Item: {
+          ...qaData,
+          type: 'qa',
+          createdAt: Date.now(),
+          createdAtISO: new Date().toISOString(),
+        },
+      });
+
+      const response = await this.docClient.send(command);
+      return { success: true, response };
+    } catch (error: any) {
+      this.logger.error('Error saving Q&A data:', error);
+      // Fall back to in-memory store on error
+      const qaItems = this.inMemoryStore.get('qa') || [];
+      qaItems.push(qaData);
+      this.inMemoryStore.set('qa', qaItems);
+      return { success: true, fallback: true };
+    }
+  }
+
   async getQAData(query?: any) {
     try {
+      if (!this.isConfigured) {
+        // Use in-memory store
+        return this.inMemoryStore.get('qa') || [];
+      }
+
       // Check if table exists first
       const command = new ScanCommand({
         TableName: this.tables.training,
         Limit: query?.limit || 100,
       });
-      
+
       try {
         const response = await this.docClient.send(command);
         // Filter for Q&A type items
@@ -457,7 +524,8 @@ export class DatabaseService implements OnModuleInit {
       }
     } catch (error) {
       this.logger.error('Error fetching Q&A data:', error);
-      return [];
+      // Fall back to in-memory store
+      return this.inMemoryStore.get('qa') || [];
     }
   }
 
@@ -467,6 +535,55 @@ export class DatabaseService implements OnModuleInit {
       Key: { id },
     });
     return await this.docClient.send(command);
+  }
+
+  async clearQAData() {
+    try {
+      // Clear Q&A data from in-memory store
+      this.inMemoryStore.set('qa', []);
+
+      if (this.isConfigured) {
+        // If using DynamoDB, scan and delete all Q&A items with type 'qa'
+        const scanCommand = new ScanCommand({
+          TableName: this.tables.training,
+          FilterExpression: '#type = :qa_type',
+          ExpressionAttributeNames: {
+            '#type': 'type'
+          },
+          ExpressionAttributeValues: {
+            ':qa_type': 'qa'
+          }
+        });
+
+        try {
+          const scanResponse = await this.docClient.send(scanCommand);
+          const qaItems = scanResponse.Items || [];
+
+          // Delete each Q&A item
+          for (const item of qaItems) {
+            const deleteCommand = new DeleteCommand({
+              TableName: this.tables.training,
+              Key: { id: item.id }
+            });
+            await this.docClient.send(deleteCommand);
+          }
+
+          this.logger.log(`Cleared ${qaItems.length} Q&A items from DynamoDB`);
+        } catch (dbError: any) {
+          if (dbError.name === 'ResourceNotFoundException') {
+            this.logger.warn('Training table does not exist, nothing to clear in DynamoDB');
+          } else {
+            throw dbError;
+          }
+        }
+      }
+
+      this.logger.log('All Q&A training data has been cleared');
+      return { success: true };
+    } catch (error) {
+      this.logger.error('Error clearing Q&A data:', error);
+      throw error;
+    }
   }
 
   // User methods

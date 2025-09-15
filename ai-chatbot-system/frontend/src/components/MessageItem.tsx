@@ -1,7 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { Message } from '@/store/chatStore';
-import { User, Bot, Heart, Frown, Smile, AlertCircle, BookOpen, FileText } from 'lucide-react';
+import { User, Bot, Heart, Frown, Smile, AlertCircle, BookOpen, FileText, Zap, HelpCircle, Meh, Eye, ChevronDown, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -11,16 +12,134 @@ interface MessageItemProps {
   message: Message;
 }
 
+// Helper function to format answer text with proper list formatting (same as admin CMS)
+const formatAnswerText = (text: string) => {
+  if (!text) return text;
+
+  if (text.includes('▪️')) {
+    const parts = text.split('▪️').filter(part => part.trim().length > 0);
+
+    if (parts.length > 1) {
+      let result = parts[0].trim();
+      for (let i = 1; i < parts.length; i++) {
+        const part = parts[i].trim();
+        const spacedPart = part.startsWith(' ') ? part : ' ' + part;
+        result += '\n▪️' + spacedPart;
+      }
+      const finalText = result
+        .replace(/(\s+)(Inhale:)/g, '\n$2')
+        .replace(/(\s+)(Exhale:)/g, '\n$2')
+        .trim();
+      return finalText;
+    }
+  }
+
+  return text
+    .replace(/(\s+)(Inhale:)/g, '\n$2')
+    .replace(/(\s+)(Exhale:)/g, '\n$2')
+    .trim();
+};
+
+// Helper function to render formatted text (same as admin CMS)
+const renderFormattedText = (text: string) => {
+  const formattedText = formatAnswerText(text);
+
+  return formattedText.split('\n').map((line, index) => {
+    const trimmedLine = line.trim();
+
+    // Check for bullet points (▪️, •, -, *, ○, ●, ▸, ►)
+    if (trimmedLine.match(/^[▪️•\-\*○●▸►]\s*/) || trimmedLine.startsWith('▪️')) {
+      return (
+        <div key={index} style={{
+          marginLeft: '20px',
+          marginBottom: '6px',
+          position: 'relative',
+          paddingLeft: '12px'
+        }}>
+          <span style={{
+            position: 'absolute',
+            left: '-12px',
+            color: '#059669',
+            fontWeight: 'bold'
+          }}>•</span>
+          {trimmedLine.replace(/^[▪️•\-\*○●▸►]\s*/, '')}
+        </div>
+      );
+    }
+
+    // Check for breathing patterns
+    if (trimmedLine.match(/^(Inhale|Exhale):/)) {
+      return (
+        <div key={index} style={{
+          marginTop: '8px',
+          marginBottom: '8px',
+          fontWeight: '600',
+          color: '#7c3aed',
+          fontSize: '14px'
+        }}>
+          {trimmedLine}
+        </div>
+      );
+    }
+
+    // Empty lines
+    if (!trimmedLine) {
+      return <div key={index} style={{ height: '8px' }} />;
+    }
+
+    // Regular lines
+    return (
+      <div key={index} style={{
+        marginBottom: '6px',
+        lineHeight: '1.6',
+        color: '#374151'
+      }}>
+        {trimmedLine}
+      </div>
+    );
+  });
+};
+
 const emotionIcons = {
-  happy: <Smile className="w-4 h-4 text-green-500" />,
-  sad: <Frown className="w-4 h-4 text-blue-500" />,
-  angry: <AlertCircle className="w-4 h-4 text-red-500" />,
-  grateful: <Heart className="w-4 h-4 text-pink-500" />,
-  neutral: null,
+  happy: { icon: <Smile className="w-4 h-4 text-green-500" />, label: 'Happy', color: 'bg-green-100 text-green-700' },
+  sad: { icon: <Frown className="w-4 h-4 text-blue-500" />, label: 'Sad', color: 'bg-blue-100 text-blue-700' },
+  angry: { icon: <AlertCircle className="w-4 h-4 text-red-500" />, label: 'Angry', color: 'bg-red-100 text-red-700' },
+  grateful: { icon: <Heart className="w-4 h-4 text-pink-500" />, label: 'Grateful', color: 'bg-pink-100 text-pink-700' },
+  fear: { icon: <AlertCircle className="w-4 h-4 text-orange-500" />, label: 'Fearful', color: 'bg-orange-100 text-orange-700' },
+  surprise: { icon: <Eye className="w-4 h-4 text-purple-500" />, label: 'Surprised', color: 'bg-purple-100 text-purple-700' },
+  confused: { icon: <HelpCircle className="w-4 h-4 text-yellow-600" />, label: 'Confused', color: 'bg-yellow-100 text-yellow-700' },
+  urgent: { icon: <Zap className="w-4 h-4 text-red-600" />, label: 'Urgent', color: 'bg-red-100 text-red-700' },
+  disgust: { icon: <Frown className="w-4 h-4 text-gray-500" />, label: 'Disgusted', color: 'bg-gray-100 text-gray-700' },
+  neutral: { icon: <Meh className="w-4 h-4 text-gray-500" />, label: 'Neutral', color: 'bg-gray-100 text-gray-700' },
+};
+
+const EmotionTags = ({ emotions, className = "" }: { emotions: string[], className?: string }) => {
+  if (!emotions || emotions.length === 0) return null;
+
+  return (
+    <div className={`flex flex-wrap gap-1 ${className}`}>
+      {emotions.slice(0, 3).map((emotion, index) => {
+        const emotionData = emotionIcons[emotion as keyof typeof emotionIcons];
+        if (!emotionData) return null;
+
+        return (
+          <span
+            key={index}
+            className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${emotionData.color}`}
+            title={`Detected emotion: ${emotionData.label}`}
+          >
+            {emotionData.icon}
+            <span className="capitalize">{emotion}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
 };
 
 export default function MessageItem({ message }: MessageItemProps) {
   const isUser = message.role === 'user';
+  const [showEmotionDetails, setShowEmotionDetails] = useState(false);
 
   return (
     <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -40,30 +159,15 @@ export default function MessageItem({ message }: MessageItemProps) {
               : 'bg-gray-100 text-gray-900'
           }`}
         >
-          <ReactMarkdown
-            className="prose prose-sm max-w-none"
-            components={{
-              code({ className, children, ...props }: any) {
-                const inline = (props as any).inline || false;
-                const match = /language-(\w+)/.exec(className || '');
-                return !inline && match ? (
-                  <SyntaxHighlighter
-                    style={vscDarkPlus as any}
-                    language={match[1]}
-                    PreTag="div"
-                  >
-                    {String(children).replace(/\n$/, '')}
-                  </SyntaxHighlighter>
-                ) : (
-                  <code className={className} {...props}>
-                    {children}
-                  </code>
-                );
-              },
-            }}
-          >
-            {message.content}
-          </ReactMarkdown>
+          {isUser ? (
+            // User messages use regular text
+            <div className="whitespace-pre-wrap">{message.content}</div>
+          ) : (
+            // Assistant messages use custom formatting like admin CMS
+            <div className="prose prose-sm max-w-none">
+              {renderFormattedText(message.content)}
+            </div>
+          )}
 
           {/* Media Attachments */}
           {message.media && message.media.length > 0 && (
@@ -89,13 +193,97 @@ export default function MessageItem({ message }: MessageItemProps) {
           )}
         </div>
 
+        {/* Multiple Emotion Tags */}
+        {(message.emotions || message.emotionTags || message.metadata?.emotionSummary) && (
+          <div className="mt-2">
+            {/* Emotion Toggle Button */}
+            <button
+              onClick={() => setShowEmotionDetails(!showEmotionDetails)}
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 mb-2"
+            >
+              {showEmotionDetails ? (
+                <ChevronDown className="w-3 h-3" />
+              ) : (
+                <ChevronRight className="w-3 h-3" />
+              )}
+              <span>
+                {showEmotionDetails ? 'Hide emotion details' : 'Show emotion details'}
+              </span>
+            </button>
+
+            {showEmotionDetails && (
+              <>
+                {/* User Input Emotions */}
+                {message.emotionTags?.inputEmotions && message.emotionTags.inputEmotions.length > 0 && (
+                  <div className="mb-2">
+                    <div className="text-xs text-gray-400 mb-1">Input emotions:</div>
+                    <EmotionTags emotions={message.emotionTags.inputEmotions} />
+                  </div>
+                )}
+
+                {/* Response Emotions (for assistant messages) */}
+                {!isUser && message.emotionTags?.responseEmotions && message.emotionTags.responseEmotions.length > 0 && (
+                  <div className="mb-2">
+                    <div className="text-xs text-gray-400 mb-1">Response style:</div>
+                    <EmotionTags emotions={message.emotionTags.responseEmotions} />
+                  </div>
+                )}
+
+                {/* Fallback to simple emotions array */}
+                {message.emotions && !message.emotionTags && (
+                  <div className="mb-2">
+                    <div className="text-xs text-gray-400 mb-1">Detected emotions:</div>
+                    <EmotionTags emotions={message.emotions} />
+                  </div>
+                )}
+
+                {/* Text-based Emotion Summary */}
+                {message.metadata?.emotionSummary && (
+                  <div className="mb-2">
+                    <div className="text-xs text-gray-600 bg-gray-50 rounded p-2 font-mono border-l-2 border-gray-300">
+                      <div className="font-semibold text-gray-700 mb-1">📊 Emotion Analysis</div>
+                      <div className="whitespace-pre-wrap">{message.metadata.emotionSummary}</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Response Style Text */}
+                {!isUser && message.metadata?.responseStyleText && (
+                  <div className="mb-2">
+                    <div className="text-xs text-blue-600 bg-blue-50 rounded p-2 font-mono border-l-2 border-blue-300">
+                      <div className="font-semibold text-blue-700 mb-1">🎯 Response Style</div>
+                      <div className="whitespace-pre-wrap">{message.metadata.responseStyleText}</div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {/* Metadata */}
         <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
           <span>{format(new Date(message.timestamp), 'HH:mm')}</span>
-          {message.emotion && emotionIcons[message.emotion as keyof typeof emotionIcons]}
+          {/* Show single emotion icon for backward compatibility */}
+          {message.emotion && emotionIcons[message.emotion as keyof typeof emotionIcons] && (
+            <div className="flex items-center gap-1">
+              {emotionIcons[message.emotion as keyof typeof emotionIcons].icon}
+            </div>
+          )}
           {message.confidence && !isUser && (
             <span className="text-gray-400">
               {Math.round(message.confidence)}% confidence
+            </span>
+          )}
+
+          {/* Empathy Level Indicator */}
+          {!isUser && message.emotionTags?.empathyLevel && message.emotionTags.empathyLevel !== 'low' && (
+            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+              message.emotionTags.empathyLevel === 'high'
+                ? 'bg-red-100 text-red-700'
+                : 'bg-yellow-100 text-yellow-700'
+            }`}>
+              {message.emotionTags.empathyLevel} empathy
             </span>
           )}
           {/* Document Usage Indicator */}

@@ -54,7 +54,7 @@ export class AuthController {
 
   @Post('refresh')
   @ApiOperation({ summary: 'Refresh authentication token' })
-  async refresh(@Body() body: { token: string }) {
+  async refresh(@Body() _body: { token: string }) {
     // In production, verify the old token and generate new one
     const newToken = this.authService.generateToken({ userId: 'refreshed-user' });
     return { token: newToken };

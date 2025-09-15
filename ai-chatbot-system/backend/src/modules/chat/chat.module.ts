@@ -9,6 +9,7 @@ import { SearchModule } from '../search/search.module';
 import { DatabaseModule } from '../database/database.module';
 import { CacheModule } from '../cache/cache.module';
 import { PersonalityModule } from '../personality/personality.module';
+import { MediaModule } from '../media/media.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { PersonalityModule } from '../personality/personality.module';
     DatabaseModule,
     CacheModule,
     PersonalityModule,
+    MediaModule,
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway],

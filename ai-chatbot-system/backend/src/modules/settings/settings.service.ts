@@ -17,6 +17,8 @@ export class SettingsService {
         temperature: this.configService.get('aws.bedrock.temperature'),
         maxTokens: this.configService.get('aws.bedrock.maxTokens'),
         responseTime: this.configService.get('performance.targetResponseTime'),
+        responseMode: 'hybrid', // Default response mode
+        priorityMode: 'qa_first', // Q&A priority mode
       },
       notifications: {
         emailEnabled: true,

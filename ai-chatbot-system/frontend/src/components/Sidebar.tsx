@@ -12,15 +12,14 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
-  const { 
-    sessions, 
-    currentSessionId, 
-    createSession, 
-    setCurrentSession, 
+  const {
+    sessions,
+    currentSessionId,
+    createSession,
     deleteSession,
     fetchSessions,
     loadSession,
-    isLoading 
+    isLoading
   } = useChatStore();
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -161,7 +160,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                           }
                           
                           return format(date, 'MMM d, HH:mm');
-                        } catch (error) {
+                        } catch {
                           return 'Recently';
                         }
                       })()}

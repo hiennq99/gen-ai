@@ -1,4 +1,4 @@
-import { EmotionType } from '../../emotion/interfaces/emotion.interface';
+import { EmotionType, ResponseEmotionTags } from '../../emotion/interfaces/emotion.interface';
 
 export interface ChatRequest {
   message: string;
@@ -17,7 +17,8 @@ export interface ChatResponse {
   id: string;
   content: string;
   media?: MediaAttachment[];
-  emotion?: EmotionType;
+  emotion?: EmotionType; // Primary emotion for backward compatibility
+  emotionTags?: ResponseEmotionTags; // New multi-emotion tags
   confidence: number;
   processingTime: number;
   metadata?: any;
@@ -44,6 +45,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
-  emotion?: EmotionType;
+  emotion?: EmotionType; // Primary emotion for backward compatibility
+  emotions?: EmotionType[]; // Multiple detected emotions
+  emotionTags?: ResponseEmotionTags; // Full emotion context for responses
   metadata?: any;
 }

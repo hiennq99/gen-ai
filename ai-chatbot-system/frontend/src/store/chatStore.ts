@@ -8,7 +8,18 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
-  emotion?: string;
+  emotion?: string; // Primary emotion for backward compatibility
+  emotions?: string[]; // Multiple detected emotions
+  emotionTags?: {
+    inputEmotions: string[];
+    responseEmotions: string[];
+    empathyLevel: 'low' | 'medium' | 'high';
+    responseStyle: {
+      tone: string;
+      formality: 'casual' | 'neutral' | 'formal';
+      supportLevel: 'basic' | 'supportive' | 'highly_supportive';
+    };
+  };
   confidence?: number;
   media?: Array<{
     type: string;

@@ -6,6 +6,7 @@ import { SearchService } from '../search/search.service';
 import { DatabaseService } from '../database/database.service';
 import { CacheService } from '../cache/cache.service';
 import { PersonalityService } from '../personality/personality.service';
+import { MediaService } from '../media/media.service';
 import type { ConversationContext } from '../personality/personality.service';
 import { ChatRequest, ChatResponse, ChatSession } from './interfaces/chat.interface';
 import { v4 as uuidv4 } from 'uuid';
@@ -24,7 +25,40 @@ export class ChatService {
     private readonly databaseService: DatabaseService,
     private readonly cacheService: CacheService,
     private readonly personalityService: PersonalityService,
+    private readonly mediaService: MediaService,
   ) {}
+
+  private formatAnswerText(text: string): string {
+    if (!text) return text;
+
+    // Format bullet points exactly like admin CMS - keep ▪️ characters
+    if (text.includes('▪️')) {
+      const parts = text.split('▪️').filter(part => part.trim().length > 0);
+
+      if (parts.length > 1) {
+        let result = parts[0].trim();
+        for (let i = 1; i < parts.length; i++) {
+          const part = parts[i].trim();
+          const spacedPart = part.startsWith(' ') ? part : ' ' + part;
+          result += '\n▪️' + spacedPart;
+        }
+
+        // Handle breathing patterns
+        result = result
+          .replace(/(\s+)(Inhale:)/g, '\n$2')
+          .replace(/(\s+)(Exhale:)/g, '\n$2')
+          .trim();
+
+        return result;
+      }
+    }
+
+    // Handle breathing patterns for non-bullet text
+    return text
+      .replace(/(\s+)(Inhale:)/g, '\n$2')
+      .replace(/(\s+)(Exhale:)/g, '\n$2')
+      .trim();
+  }
 
   async processMessage(request: ChatRequest): Promise<ChatResponse> {
     const startTime = Date.now();
@@ -75,37 +109,57 @@ export class ChatService {
         // Return the exact content from the best matching document
         const bestMatch = searchResults[0];
         const rawAnswer = bestMatch.content || bestMatch.text || 'No exact match found.';
-        
+
+        // Format the raw answer to handle bullet points properly
+        const formattedAnswer = this.formatAnswerText(rawAnswer);
+
         // Check if this is the first message in the session
         const isFirstMessage = !conversationHistory || conversationHistory.length === 0;
-        
-        // Format response with empathetic header + raw answer
+
+        // Format response with empathetic header + formatted answer
         let formattedContent = '';
-        
+
         // Generate empathetic header based on emotion
         const emotionalHeader = this.personalityService.generateEmpatheticHeader(
           emotionAnalysis.primaryEmotion,
           isFirstMessage,
           request.message
         );
-        
-        // Combine header with raw answer
-        formattedContent = `${emotionalHeader}\n\n${rawAnswer}`;
+
+        // Combine header with formatted answer
+        formattedContent = `${emotionalHeader}\n\n${formattedAnswer}`;
         
         const matchType = hasExactQAMatch ? 'exact Q&A match (raw answer)' : 'exact document match';
         this.logger.log(`Returning ${matchType}`);
         
+        // Generate emotion tags for response
+        const emotionTags = this.emotionService.generateResponseEmotionTags(emotionAnalysis);
+
+        // Generate emotion text summaries
+        const emotionSummary = this.emotionService.getEmotionSummary(emotionAnalysis);
+        const responseStyleText = this.emotionService.getResponseStyleText(emotionTags);
+
+        // Generate dummy media based on emotion and content
+        const dummyMedia = this.mediaService.generateDummyMedia(
+          emotionAnalysis.primaryEmotion,
+          request.message,
+          true // Enable media generation
+        );
+
         // Format as direct response
         const response: ChatResponse = {
           id: messageId,
           content: formattedContent,
-          media: [],
+          media: dummyMedia,
           emotion: emotionAnalysis.primaryEmotion,
+          emotionTags,
           confidence: bestMatch.score ? bestMatch.score * 100 : 100,
           processingTime: Date.now() - startTime,
           metadata: {
             sessionId: request.sessionId,
             emotionAnalysis,
+            emotionSummary,
+            responseStyleText,
             documentsUsed: 1,
             documents: [{
               title: bestMatch.title || bestMatch.documentId || 'Document',
@@ -135,6 +189,7 @@ export class ChatService {
           userMessage: request.message,
           assistantMessage: formattedContent,
           emotion: emotionAnalysis,
+          emotionTags,
           processingTime: Date.now() - startTime,
           metadata: {
             mode: 'exact-match',
@@ -184,12 +239,18 @@ export class ChatService {
         },
       });
 
-      // Format response with media
-      let formattedResponse = await this.formatResponse(
-        claudeResponse.content,
-        searchResults,
-        emotionAnalysis,
+      // Generate dummy media for AI response
+      const aiResponseMedia = this.mediaService.generateDummyMedia(
+        emotionAnalysis.primaryEmotion,
+        request.message,
+        true // Enable media generation
       );
+
+      // Format response with media
+      const formattedResponse = {
+        content: claudeResponse.content,
+        media: aiResponseMedia
+      };
       
       // Check if this is the first message in the session
       const isFirstMessage = !conversationHistory || conversationHistory.length === 0;
@@ -204,6 +265,13 @@ export class ChatService {
       // Format as Header + Answer
       formattedResponse.content = `${emotionalHeader}\n\n${formattedResponse.content}`;
 
+      // Generate emotion tags for AI response
+      const emotionTags = this.emotionService.generateResponseEmotionTags(emotionAnalysis);
+
+      // Generate emotion text summaries
+      const emotionSummary = this.emotionService.getEmotionSummary(emotionAnalysis);
+      const responseStyleText = this.emotionService.getResponseStyleText(emotionTags);
+
       // Save to database
       await this.saveConversation({
         messageId,
@@ -212,6 +280,7 @@ export class ChatService {
         userMessage: request.message,
         assistantMessage: formattedResponse.content,
         emotion: emotionAnalysis,
+        emotionTags,
         processingTime: Date.now() - startTime,
         metadata: {
           modelUsed: claudeResponse.modelId,
@@ -237,11 +306,14 @@ export class ChatService {
         content: formattedResponse.content,
         media: formattedResponse.media,
         emotion: emotionAnalysis.primaryEmotion,
+        emotionTags,
         confidence: this.calculateResponseConfidence(searchResults, emotionAnalysis),
         processingTime: Date.now() - startTime,
         metadata: {
           sessionId: request.sessionId,
           emotionAnalysis,
+          emotionSummary,
+          responseStyleText,
           documentsUsed: searchResults.length,
           documents: documentsUsed,
           cached: false,

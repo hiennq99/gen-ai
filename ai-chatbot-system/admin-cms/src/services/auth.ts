@@ -81,7 +81,7 @@ export const authService = {
       
       const response = await api.get('/auth/validate');
       return response.data.valid;
-    } catch (error) {
+    } catch {
       // In development, if API fails but we have a token, consider it valid
       const token = localStorage.getItem('authToken');
       return !!token;
