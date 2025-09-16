@@ -75,15 +75,25 @@ export class DashboardService {
 
   private getEmotionDistribution(conversations: any[]) {
     const emotionMap = new Map<string, number>();
-    
+
     conversations.forEach((conv: any) => {
       if (conv.emotion) {
-        emotionMap.set(conv.emotion, (emotionMap.get(conv.emotion) || 0) + 1);
+        // Extract the emotion string, handling both string and object formats
+        let emotionString: string;
+        if (typeof conv.emotion === 'string') {
+          emotionString = conv.emotion;
+        } else if (conv.emotion.primaryEmotion) {
+          emotionString = conv.emotion.primaryEmotion;
+        } else {
+          emotionString = 'neutral';
+        }
+
+        emotionMap.set(emotionString, (emotionMap.get(emotionString) || 0) + 1);
       }
     });
 
     return Array.from(emotionMap.entries()).map(([type, value]) => ({
-      type: type.charAt(0).toUpperCase() + type.slice(1),
+      type: typeof type === 'string' ? type.charAt(0).toUpperCase() + type.slice(1) : 'Unknown',
       value,
     }));
   }

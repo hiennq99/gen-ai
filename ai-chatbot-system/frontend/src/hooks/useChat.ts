@@ -49,18 +49,67 @@ export function useChat() {
       })();
 
       // Send via WebSocket if connected, otherwise use HTTP
-      if (socket && connected) {
-        socket.emit('message', {
-          message: content,
-          sessionId,
-          userId,
-          metadata: {
-            mode: options?.mode || 'ai',
-          },
-        });
+      console.log('🔌 WebSocket status:', { socket: !!socket, connected, isConnected });
+      // TEMPORARILY DISABLE WEBSOCKET DUE TO CONNECTION ISSUES - USE HTTP ONLY
+      if (false && socket && connected) {
+        console.log('📡 Using WebSocket to send message');
 
-        // Listen for response
+        // Listen for response with timeout fallback
+        let responseReceived = false;
+        let messageSent = false;
+
+        const responseTimeout = setTimeout(async () => {
+          if (!responseReceived && !messageSent) {
+            console.log('⏰ WebSocket response timeout, falling back to HTTP');
+            try {
+              const response = await chatService.sendMessage({
+                message: content,
+                sessionId,
+                userId,
+                metadata: {
+                  mode: options?.mode || 'ai',
+                },
+              });
+
+              console.log('📩 HTTP Fallback Response received:', response);
+              addMessage({
+                role: 'assistant',
+                content: response.content,
+                emotion: response.emotion,
+                confidence: response.confidence,
+                media: response.media,
+                metadata: response.metadata,
+              });
+              console.log('✅ Assistant message added to store (fallback)');
+            } catch (fallbackError) {
+              console.error('❌ HTTP fallback failed:', fallbackError);
+              toast.error('Failed to get response');
+            }
+            setTyping(false);
+            setLoading(false);
+          }
+        }, 3000); // Reduced to 3 seconds
+
+        // Only send via WebSocket if we haven't timed out
+        setTimeout(() => {
+          if (!responseReceived) {
+            messageSent = true;
+            socket.emit('message', {
+              message: content,
+              sessionId,
+              userId,
+              metadata: {
+                mode: options?.mode || 'ai',
+              },
+            });
+            console.log('📡 WebSocket message sent');
+          }
+        }, 100); // Small delay to set up listeners first
+
         socket.once('response', (response) => {
+          responseReceived = true;
+          clearTimeout(responseTimeout);
+          console.log('📡 WebSocket Response received:', response);
           addMessage({
             role: 'assistant',
             content: response.content,
@@ -73,13 +122,40 @@ export function useChat() {
           setLoading(false);
         });
 
-        socket.once('error', (_error) => {
-          toast.error('Failed to get response');
+        socket.once('error', async (_error) => {
+          responseReceived = true;
+          clearTimeout(responseTimeout);
+          console.log('❌ WebSocket error, falling back to HTTP');
+          try {
+            const response = await chatService.sendMessage({
+              message: content,
+              sessionId,
+              userId,
+              metadata: {
+                mode: options?.mode || 'ai',
+              },
+            });
+
+            console.log('📩 HTTP Error Fallback Response received:', response);
+            addMessage({
+              role: 'assistant',
+              content: response.content,
+              emotion: response.emotion,
+              confidence: response.confidence,
+              media: response.media,
+              metadata: response.metadata,
+            });
+            console.log('✅ Assistant message added to store (error fallback)');
+          } catch (fallbackError) {
+            console.error('❌ HTTP error fallback failed:', fallbackError);
+            toast.error('Failed to get response');
+          }
           setTyping(false);
           setLoading(false);
         });
       } else {
         // Fallback to HTTP
+        console.log('🌐 Using HTTP fallback to send message');
         const userId = localStorage.getItem('userId') || (() => {
           const anonymousId = `user-${Date.now()}`;
           localStorage.setItem('userId', anonymousId);
@@ -95,6 +171,7 @@ export function useChat() {
           },
         });
 
+        console.log('📩 HTTP Response received:', response);
         addMessage({
           role: 'assistant',
           content: response.content,
@@ -103,6 +180,7 @@ export function useChat() {
           media: response.media,
           metadata: response.metadata,
         });
+        console.log('✅ Assistant message added to store');
       }
     } catch (error) {
       console.error('Error sending message:', error);

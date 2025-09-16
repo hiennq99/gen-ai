@@ -142,8 +142,14 @@ export class ChatService {
 
         // Combine header with formatted answer
         formattedContent = `${emotionalHeader}\n\n${formattedAnswer}`;
-        
-        const matchType = hasExactQAMatch ? 'exact Q&A match (raw answer)' : 'exact document match';
+
+        // Determine match type and quality
+        const isHighConfidence = bestMatch.metadata?.isHighConfidenceMatch || bestMatch.score >= 0.9;
+        const matchQuality = bestMatch.metadata?.qualityTier || 'standard';
+        const matchType = isHighConfidence ?
+          `HIGH CONFIDENCE MATCH (${(bestMatch.score * 100).toFixed(1)}% - Premium Quality)` :
+          hasExactQAMatch ? 'exact Q&A match (raw answer)' : 'exact document match';
+
         this.logger.log(`Returning ${matchType}`);
         
         // Generate emotion tags for response
@@ -193,6 +199,11 @@ export class ChatService {
               rawAnswer: hasExactQAMatch,
               semanticMatch: bestMatch.metadata?.semanticMatch || false,
               matchScore: bestMatch.score ? (bestMatch.score * 100).toFixed(1) + '%' : '100%',
+              confidenceLevel: bestMatch.metadata?.confidence || 'unknown',
+              matchType: bestMatch.metadata?.type || 'standard',
+              qualityTier: bestMatch.metadata?.qualityTier || 'standard',
+              isHighConfidence: isHighConfidence,
+              matchQuality: matchQuality,
             },
             mode: hasExactQAMatch ? 'qa-exact-match' : 'exact-match',
           },

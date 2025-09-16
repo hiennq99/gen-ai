@@ -8,6 +8,8 @@ export interface QAPair {
     category?: string;
     emotion?: string;
     originalDocument?: string;
+    isHighConfidenceMatch?: boolean;
+    matchQuality?: 'excellent' | 'high' | 'medium' | 'low';
   };
 }
 

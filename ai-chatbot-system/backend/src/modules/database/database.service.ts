@@ -29,8 +29,7 @@ export class DatabaseService implements OnModuleInit {
     this.inMemoryStore.set('sessions', []);
     this.inMemoryStore.set('qa', []);
 
-    // Load test Q&A data
-    this.loadTestQAData();
+    // No hardcoded Q&A data - use vector database approach
 
     const clientConfig: any = {
       region: region || 'us-east-1',
@@ -501,42 +500,40 @@ export class DatabaseService implements OnModuleInit {
 
   async getQAData(query?: any) {
     try {
-      // ALWAYS use in-memory store first for training mode
-      const inMemoryData = this.inMemoryStore.get('qa') || [];
-      if (inMemoryData.length > 0) {
-        this.logger.log(`🔍 QA DATA: Using ${inMemoryData.length} in-memory Q&A items`);
-        return inMemoryData;
-      }
+      // PRIORITIZE DynamoDB for vector database approach
+      if (this.isConfigured) {
+        try {
+          const command = new ScanCommand({
+            TableName: this.tables.training,
+            Limit: query?.limit || 1000, // Increased limit for better semantic search
+          });
 
-      if (!this.isConfigured) {
-        // Use in-memory store
-        return inMemoryData;
-      }
+          const response = await this.docClient.send(command);
+          // Filter for Q&A type items
+          const items = response.Items || [];
+          const qaItems = items.filter((item: any) => item.type === 'qa');
 
-      // Only check DynamoDB if no in-memory data exists
-      const command = new ScanCommand({
-        TableName: this.tables.training,
-        Limit: query?.limit || 100,
-      });
-
-      try {
-        const response = await this.docClient.send(command);
-        // Filter for Q&A type items
-        const items = response.Items || [];
-        const qaItems = items.filter((item: any) => item.type === 'qa');
-        this.logger.log(`🔍 QA DATA: Using ${qaItems.length} DynamoDB Q&A items`);
-        return qaItems;
-      } catch (scanError: any) {
-        // If table doesn't exist, return empty array
-        if (scanError.name === 'ResourceNotFoundException') {
-          this.logger.warn('Training table does not exist yet');
-          return [];
+          if (qaItems.length > 0) {
+            this.logger.log(`🔍 QA DATA: Using ${qaItems.length} DynamoDB Q&A items (vector database mode)`);
+            return qaItems;
+          }
+        } catch (scanError: any) {
+          // If table doesn't exist, continue to fallback
+          if (scanError.name === 'ResourceNotFoundException') {
+            this.logger.warn('Training table does not exist yet - using fallback');
+          } else {
+            this.logger.error('DynamoDB scan error:', scanError.message);
+          }
         }
-        throw scanError;
       }
+
+      // Fallback to in-memory store only if DynamoDB fails or is not configured
+      const inMemoryData = this.inMemoryStore.get('qa') || [];
+      this.logger.log(`🔍 QA DATA: Using ${inMemoryData.length} in-memory Q&A items (fallback mode)`);
+      return inMemoryData;
     } catch (error) {
       this.logger.error('Error fetching Q&A data:', error);
-      // Fall back to in-memory store
+      // Last resort fallback
       return this.inMemoryStore.get('qa') || [];
     }
   }
@@ -733,90 +730,5 @@ export class DatabaseService implements OnModuleInit {
     }
   }
 
-  private loadTestQAData() {
-    // Load test Q&A data into in-memory store
-    const qaItems = [
-      {
-        "id": "d336a2da-96a6-430a-a424-e8e864e7d22d",
-        "question": "What dhikr can i recite when i am feeling sad?",
-        "answer": "When you're feeling sad, there are several dhikr (remembrances) and supplications you can recite to seek comfort and solace from Allah. Here are a few: Tasbih (SubhanAllah): Saying \"SubhanAllah\" means \"Glory be to Allah.\" It helps you remember the greatness and glory of Allah. Tahmid (Alhamdulillah): Saying \"Alhamdulillah\" means \"All praise is due to Allah.\" It reminds you to be grateful for the blessings you have, which can be uplifting.",
-        "emotion": "sad",
-        "metadata": {
-          "source": "test_data_upload",
-          "uploadedAt": "2025-09-16T09:07:22.587Z"
-        },
-        "createdAt": "2025-09-16T09:07:22.587Z"
-      },
-      {
-        "id": "37f6bb30-fefb-4b2b-a2c4-6b3a5a04db67",
-        "question": "Why do I feel sad even when I am trying to stay positive?",
-        "answer": "Feeling sad even when you're trying to stay positive is a common experience, and it can be due to a variety of reasons. Here are a few possibilities: Suppressed Emotions: Trying to constantly stay positive can sometimes lead to suppressing genuine emotions. It's important to acknowledge and process these feelings rather than pushing them aside. Unrealistic Expectations: If you're setting high expectations for yourself to always feel positive, it can lead to disappointment and sadness when those expectations aren't met.",
-        "emotion": "sad",
-        "metadata": {
-          "source": "test_data_upload",
-          "uploadedAt": "2025-09-16T09:07:22.587Z"
-        },
-        "createdAt": "2025-09-16T09:07:22.587Z"
-      },
-      {
-        "id": "5245dc3f-5808-4cc7-9bb3-363825b8f8f7",
-        "question": "What does Islam say about experiencing sadness?",
-        "answer": "Islam acknowledges that experiencing sadness is a natural part of the human experience. The religion provides guidance on how to cope with such emotions in a constructive and spiritual manner. Here are some key points regarding Islam's perspective on sadness: Acknowledgment of Human Emotions: Islam recognizes that humans will go through a range of emotions, including sadness. The Quran and Hadiths offer examples of prophets and pious people who experienced sadness and turned to God for relief.",
-        "emotion": "sad",
-        "metadata": {
-          "source": "test_data_upload",
-          "uploadedAt": "2025-09-16T09:07:22.587Z"
-        },
-        "createdAt": "2025-09-16T09:07:22.587Z"
-      },
-      {
-        "id": "3026be18-b422-409d-9aba-5e88da6ce1d4",
-        "question": "How can I express gratitude when feeling happy?",
-        "answer": "When feeling happy, expressing gratitude is a beautiful way to acknowledge blessings. You can say \"Alhamdulillah\" (All praise is due to Allah) to thank Allah for the joy you're experiencing. Additionally, performing extra prayers (nafl), giving charity (sadaqah), or sharing your happiness with others are wonderful ways to express gratitude.",
-        "emotion": "happy",
-        "metadata": {
-          "source": "test_data_upload",
-          "uploadedAt": "2025-09-16T09:07:22.587Z"
-        },
-        "createdAt": "2025-09-16T09:07:22.587Z"
-      },
-      {
-        "id": "ed27ed3e-ddf4-424d-9186-f0ad111b6d6c",
-        "question": "What supplication helps with anxiety?",
-        "answer": "For anxiety, recite \"La hawla wa la quwwata illa billah\" (There is no power and no strength except with Allah). This powerful dhikr reminds you that ultimate control lies with Allah. Also, the dua \"Hasbunallahu wa ni'mal wakeel\" (Allah is sufficient for us and He is the best disposer of affairs) can bring peace to an anxious heart.",
-        "emotion": "anxious",
-        "metadata": {
-          "source": "test_data_upload",
-          "uploadedAt": "2025-09-16T09:07:22.587Z"
-        },
-        "createdAt": "2025-09-16T09:07:22.587Z"
-      },
-      {
-        "id": "spiritual-emptiness-001",
-        "question": "I feel spiritually empty. I still pray, but I feel nothing.",
-        "answer": "Experiencing spiritual emptiness while maintaining your prayers is a trial that many believers face. This feeling doesn't mean your prayers are invalid or that Allah is not listening. Consider these approaches: 1) Vary your worship - try different forms of dhikr, read Quran with reflection, or make dua in your own words. 2) Seek Allah's guidance through Istighfar (asking forgiveness) - say 'Astaghfirullah' frequently. 3) Remember that spiritual dryness can be a test of faith. The Prophet (PBUH) said that continuing worship during difficult times brings great reward. 4) Connect with Islamic community or scholars for spiritual guidance. Allah tests those He loves, and your consistency in prayer despite feeling empty shows true faith.",
-        "emotion": "spiritual_emptiness",
-        "metadata": {
-          "source": "manual_addition",
-          "uploadedAt": "2025-09-16T10:40:00.000Z"
-        },
-        "createdAt": "2025-09-16T10:40:00.000Z"
-      }
-    ];
-
-    // Clear existing QA data
-    this.inMemoryStore.set('qa', []);
-
-    // Add our test data
-    qaItems.forEach(qaItem => {
-      const currentQAItems = this.inMemoryStore.get('qa') || [];
-      currentQAItems.push(qaItem);
-      this.inMemoryStore.set('qa', currentQAItems);
-    });
-
-    this.logger.log(`📚 DATABASE INIT: Loaded ${qaItems.length} Q&A training items into in-memory store`);
-    qaItems.forEach((qa, i) => {
-      this.logger.log(`  ${i+1}. "${qa.question}" (${qa.emotion})`);
-    });
-  }
+  // Removed hardcoded Q&A data - now using pure vector database approach with DynamoDB
 }
