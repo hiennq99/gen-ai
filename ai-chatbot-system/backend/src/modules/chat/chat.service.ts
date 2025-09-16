@@ -65,6 +65,12 @@ export class ChatService {
     const messageId = uuidv4();
 
     try {
+      // Ensure we have a session ID for proper conversation tracking
+      const sessionId = request.sessionId || uuidv4();
+      request.sessionId = sessionId;
+
+      this.logger.log(`Processing message for session: ${sessionId}, hasSessionId: ${!!request.sessionId}`);
+
       // Check cache first
       const cachedResponse = await this.getCachedResponse(request.message);
       if (cachedResponse) {
@@ -77,36 +83,42 @@ export class ChatService {
       this.logger.debug(`Detected emotion: ${emotionAnalysis.primaryEmotion}`);
 
       // Get conversation history early to check if it's first message
-      const conversationHistory = await this.getConversationHistory(request.sessionId || '');
+      const conversationHistory = await this.getConversationHistory(sessionId);
       
       // Search for relevant context - prioritize exact Q&A matches
       const searchResults = await this.searchService.searchDocuments({
         query: request.message,
         emotion: emotionAnalysis.primaryEmotion,
         limit: 5,
-        minScore: 0.65, // Lowered to 65% to catch more relevant documents
+        minScore: 0.1, // LOWERED to 10% to always find the best available match
         exactMatchFirst: true, // Prioritize exact Q&A matches
       });
 
-      // Check if we have a high-relevance match (>65% relevance)
-      const hasHighRelevanceMatch = searchResults.length > 0 && searchResults[0].score >= 0.65;
-      
-      // Check if we have an exact Q&A match (score >= 0.9 or type = qa_exact_match)
-      const hasExactQAMatch = searchResults.length > 0 && 
-                              (searchResults[0].score >= 0.9 || 
-                               searchResults[0].metadata?.type === 'qa_exact_match');
-      
-      // Use document content if relevance is above 65%
-      const exactMatchMode = hasHighRelevanceMatch || // Use document if relevance > 65%
-                            hasExactQAMatch || // Automatically use exact mode for Q&A matches
-                            request.metadata?.exactMatch || 
-                            request.metadata?.mode === 'exact' ||
-                            this.configService.get('chat.exactMatchMode', false);
-      
-      this.logger.log(`Mode: ${request.metadata?.mode}, Exact match: ${exactMatchMode}, Q&A match: ${hasExactQAMatch}, Best score: ${searchResults[0]?.score?.toFixed(2) || 'N/A'}, Search results: ${searchResults.length}`);
-      
-      if (exactMatchMode && searchResults.length > 0) {
-        // Return the exact content from the best matching document
+      // Check if we have a high-relevance match (>50% relevance) - LOWERED THRESHOLD FOR BETTER MATCHING
+      const hasHighRelevanceMatch = searchResults.length > 0 && searchResults[0].score >= 0.5;
+
+      // Check if we have a Q&A match (score >= 0.5 for 50%+ similarity)
+      const hasExactQAMatch = searchResults.length > 0 &&
+                              (searchResults[0].score >= 0.5 ||
+                               searchResults[0].metadata?.type === 'qa_exact_match' ||
+                               searchResults[0].metadata?.type === 'qa_semantic_high' ||
+                               searchResults[0].metadata?.type === 'qa_semantic_medium' ||
+                               searchResults[0].metadata?.type === 'qa_semantic_match');
+
+      // TRAINING-ONLY MODE: Always use the best matching training document, never AI knowledge
+      const bestDocument = searchResults.length > 0 ? searchResults[0] : null;
+      const documentScore = bestDocument?.score || 0;
+
+      // FORCE TRAINING-ONLY: Always use training documents, never AI generation
+      const useTrainingOnly = true; // Always use training data
+      const exactMatchMode = bestDocument !== null; // Use document if available
+
+      this.logger.log(`🎯 TRAINING-ONLY MODE: Best document found with ${documentScore.toFixed(3)} score`);
+
+      this.logger.log(`🎯 TRAINING-ONLY: Using document: ${exactMatchMode}, Q&A match: ${hasExactQAMatch}, Best score: ${documentScore.toFixed(3)}, Search results: ${searchResults.length}`);
+
+      if (exactMatchMode) {
+        // Return the exact content from the best matching training document
         const bestMatch = searchResults[0];
         const rawAnswer = bestMatch.content || bestMatch.text || 'No exact match found.';
 
@@ -115,6 +127,8 @@ export class ChatService {
 
         // Check if this is the first message in the session
         const isFirstMessage = !conversationHistory || conversationHistory.length === 0;
+
+        this.logger.log(`First message check: conversationHistory=${JSON.stringify(conversationHistory)}, isFirstMessage=${isFirstMessage}, sessionId=${request.sessionId}`);
 
         // Format response with empathetic header + formatted answer
         let formattedContent = '';
@@ -162,20 +176,23 @@ export class ChatService {
             responseStyleText,
             documentsUsed: 1,
             documents: [{
-              title: bestMatch.title || bestMatch.documentId || 'Document',
+              title: bestMatch.title || bestMatch.metadata?.matchedQuestion || bestMatch.documentId || 'Training Question',
               relevanceScore: bestMatch.score ? (bestMatch.score * 100).toFixed(1) + '%' : '100%',
               excerpt: rawAnswer.substring(0, 200) + '...',
+              matchType: bestMatch.metadata?.type || 'qa_match',
+              originalQuestion: bestMatch.metadata?.matchedQuestion,
+              similarityScore: bestMatch.score ? (bestMatch.score * 100).toFixed(1) + '%' : '100%',
             }],
             cached: false,
             contextInfo: {
               totalDocuments: searchResults.length,
               contextUsed: true,
-              message: hasExactQAMatch 
-                ? `Exact Q&A answer from knowledge base`
-                : `Exact match from document (no AI interpretation)`,
+              message: this.getMatchTypeMessage(bestMatch),
               qaMatch: hasExactQAMatch,
               matchedQuestion: bestMatch.metadata?.matchedQuestion,
               rawAnswer: hasExactQAMatch,
+              semanticMatch: bestMatch.metadata?.semanticMatch || false,
+              matchScore: bestMatch.score ? (bestMatch.score * 100).toFixed(1) + '%' : '100%',
             },
             mode: hasExactQAMatch ? 'qa-exact-match' : 'exact-match',
           },
@@ -200,137 +217,136 @@ export class ChatService {
         return response;
       }
 
-      // Build context from search results
-      const context = this.buildContext(searchResults, emotionAnalysis);
+      // TRAINING-ONLY FALLBACK: No training documents found - inform user
+      if (searchResults.length === 0) {
+        this.logger.warn('First message with no search results - creating welcome response');
 
-      // Use the conversation history we already fetched
-      const history = conversationHistory;
+        const emotionalHeader = this.personalityService.generateEmpatheticHeader(
+          emotionAnalysis.primaryEmotion,
+          true,
+          request.message
+        );
 
-      // Build conversation context for personality
-      const conversationContext = await this.buildConversationContext(
-        request.userId || 'anonymous',
-        request.sessionId,
-        emotionAnalysis.primaryEmotion,
-        history,
-      );
+        const trainingOnlyResponse = `I apologize, but I don't have any training documents that match your question "${request.message}". I can only provide answers based on my training documents. Please try asking about topics covered in my training data.`;
 
-      // Prepare messages for Claude
-      const messages = this.prepareMessages(request.message, history);
+        const emotionTags = this.emotionService.generateResponseEmotionTags(emotionAnalysis);
+        const emotionSummary = this.emotionService.getEmotionSummary(emotionAnalysis);
+        const responseStyleText = this.emotionService.getResponseStyleText(emotionTags);
 
-      // Get emotion-based system prompt
-      const emotionContext = this.emotionService.getEmotionContext(emotionAnalysis.primaryEmotion);
-      const basePrompt = this.buildSystemPrompt(emotionContext, request.metadata);
-      
-      // Enhance with personality
-      const systemPrompt = this.personalityService.getPersonalizedSystemPrompt(
-        conversationContext,
-        basePrompt,
-      );
+        const dummyMedia = this.mediaService.generateDummyMedia(
+          emotionAnalysis.primaryEmotion,
+          request.message,
+          true
+        );
 
-      // Query Claude with context
-      const claudeResponse = await this.bedrockService.invokeModel({
-        messages,
-        context,
-        systemPrompt,
-        metadata: {
-          userId: request.userId,
-          sessionId: request.sessionId,
+        const welcomeResponse: ChatResponse = {
+          id: messageId,
+          content: `${emotionalHeader}\n\n${trainingOnlyResponse}`,
+          media: dummyMedia,
           emotion: emotionAnalysis.primaryEmotion,
-        },
-      });
+          emotionTags,
+          confidence: 75,
+          processingTime: Date.now() - startTime,
+          metadata: {
+            sessionId: request.sessionId,
+            emotionAnalysis,
+            emotionSummary,
+            responseStyleText,
+            documentsUsed: 0,
+            documents: [],
+            cached: false,
+            contextInfo: {
+              totalDocuments: 0,
+              contextUsed: false,
+              message: 'Training-only mode: No matching training documents found',
+              firstMessage: true,
+            },
+            mode: 'training-only-no-match',
+          },
+        };
 
-      // Generate dummy media for AI response
-      const aiResponseMedia = this.mediaService.generateDummyMedia(
-        emotionAnalysis.primaryEmotion,
-        request.message,
-        true // Enable media generation
-      );
+        await this.saveConversation({
+          messageId,
+          sessionId: request.sessionId,
+          userId: request.userId,
+          userMessage: request.message,
+          assistantMessage: welcomeResponse.content,
+          emotion: emotionAnalysis,
+          emotionTags,
+          processingTime: Date.now() - startTime,
+          metadata: {
+            mode: 'training-only-no-match',
+          },
+        });
 
-      // Format response with media
-      const formattedResponse = {
-        content: claudeResponse.content,
-        media: aiResponseMedia
-      };
-      
-      // Check if this is the first message in the session
-      const isFirstMessage = !conversationHistory || conversationHistory.length === 0;
-      
-      // Generate empathetic header based on emotion
+        return welcomeResponse;
+      }
+
+      // TRAINING-ONLY FALLBACK: No matching training documents found - inform user
+      this.logger.warn('Training-only mode: No training documents found for question');
+
       const emotionalHeader = this.personalityService.generateEmpatheticHeader(
         emotionAnalysis.primaryEmotion,
-        isFirstMessage,
+        !conversationHistory || conversationHistory.length === 0,
         request.message
       );
-      
-      // Format as Header + Answer
-      formattedResponse.content = `${emotionalHeader}\n\n${formattedResponse.content}`;
 
-      // Generate emotion tags for AI response
+      const noMatchResponse = `I apologize, but I couldn't find any training documents that match your question "${request.message}". I can only provide answers based on my training documents. Please try asking about topics covered in my training data.`;
+
       const emotionTags = this.emotionService.generateResponseEmotionTags(emotionAnalysis);
-
-      // Generate emotion text summaries
       const emotionSummary = this.emotionService.getEmotionSummary(emotionAnalysis);
       const responseStyleText = this.emotionService.getResponseStyleText(emotionTags);
 
-      // Save to database
-      await this.saveConversation({
-        messageId,
-        sessionId: request.sessionId,
-        userId: request.userId,
-        userMessage: request.message,
-        assistantMessage: formattedResponse.content,
-        emotion: emotionAnalysis,
-        emotionTags,
-        processingTime: Date.now() - startTime,
-        metadata: {
-          modelUsed: claudeResponse.modelId,
-          tokensUsed: claudeResponse.usage,
-          contextUsed: context.substring(0, 200),
-        },
-      });
+      const dummyMedia = this.mediaService.generateDummyMedia(
+        emotionAnalysis.primaryEmotion,
+        request.message,
+        true
+      );
 
-      // Cache response if applicable
-      if (emotionAnalysis.confidence > 80) {
-        await this.cacheResponse(request.message, formattedResponse);
-      }
-
-      // Extract document information for transparency
-      const documentsUsed = searchResults.map((result: any) => ({
-        title: result.title || result.documentId || 'Unknown Document',
-        relevanceScore: result.score ? (result.score * 100).toFixed(1) + '%' : 'N/A',
-        excerpt: result.content ? result.content.substring(0, 100) + '...' : '',
-      }));
-
-      const response: ChatResponse = {
+      const noMatchResponseObject: ChatResponse = {
         id: messageId,
-        content: formattedResponse.content,
-        media: formattedResponse.media,
+        content: `${emotionalHeader}\n\n${noMatchResponse}`,
+        media: dummyMedia,
         emotion: emotionAnalysis.primaryEmotion,
         emotionTags,
-        confidence: this.calculateResponseConfidence(searchResults, emotionAnalysis),
+        confidence: 0,
         processingTime: Date.now() - startTime,
         metadata: {
           sessionId: request.sessionId,
           emotionAnalysis,
           emotionSummary,
           responseStyleText,
-          documentsUsed: searchResults.length,
-          documents: documentsUsed,
+          documentsUsed: 0,
+          documents: [],
           cached: false,
           contextInfo: {
-            totalDocuments: searchResults.length,
-            contextUsed: searchResults.length > 0,
-            message: searchResults.length > 0 
-              ? `Used ${searchResults.length} document(s) from your knowledge base to answer this question.`
-              : 'No relevant documents found in knowledge base. Using general AI knowledge.',
+            totalDocuments: 0,
+            contextUsed: false,
+            message: 'Training-only mode: No matching training documents found',
+            documentsReferenced: false,
+            semanticMatches: 0,
+            documentVisibilityNote: 'No relevant training documents found',
+            hasLowConfidenceDocuments: false,
           },
+          mode: 'training-only-no-match',
         },
       };
 
-      // Log performance metrics
-      this.logPerformanceMetrics(response);
+      await this.saveConversation({
+        messageId,
+        sessionId: request.sessionId,
+        userId: request.userId,
+        userMessage: request.message,
+        assistantMessage: noMatchResponseObject.content,
+        emotion: emotionAnalysis,
+        emotionTags,
+        processingTime: Date.now() - startTime,
+        metadata: {
+          mode: 'training-only-no-match',
+        },
+      });
 
-      return response;
+      return noMatchResponseObject;
     } catch (error) {
       this.logger.error('Error processing message:', error);
       throw error;
@@ -619,6 +635,57 @@ export class ChatService {
       this.logger.error('Error handling emotion selection:', error);
       throw error;
     }
+  }
+
+  private getMatchTypeMessage(bestMatch: any): string {
+    const matchType = bestMatch.metadata?.type;
+    const score = bestMatch.score ? (bestMatch.score * 100).toFixed(1) + '%' : '100%';
+
+    switch (matchType) {
+      case 'qa_exact_match':
+        return `Found exact match in training data (${score} similarity)`;
+      case 'qa_semantic_high':
+        return `Found high semantic similarity with training question: "${bestMatch.metadata?.matchedQuestion}" (${score} similarity)`;
+      case 'qa_semantic_medium':
+        return `Found medium semantic similarity with training question: "${bestMatch.metadata?.matchedQuestion}" (${score} similarity)`;
+      case 'qa_semantic_match':
+        return `Found similar meaning to training question: "${bestMatch.metadata?.matchedQuestion}" (${score} similarity)`;
+      case 'qa_low_match':
+        return `Found low but relevant match to training question: "${bestMatch.metadata?.matchedQuestion}" (${score} similarity)`;
+      case 'qa_best_available':
+        return `Best available match from training data: "${bestMatch.metadata?.matchedQuestion}" (${score} relevance)`;
+      default:
+        return `Matched training document with ${score} relevance - best available`;
+    }
+  }
+
+  private getAIResponseContextMessage(searchResults: any[]): string {
+    if (searchResults.length === 0) {
+      return 'No relevant documents found in knowledge base. Using general AI knowledge.';
+    }
+
+    const highConfidence = searchResults.filter(r => r.score >= 0.75).length;
+    const mediumConfidence = searchResults.filter(r => r.score >= 0.5 && r.score < 0.75).length;
+    const lowConfidence = searchResults.filter(r => r.score >= 0.3 && r.score < 0.5).length;
+    const semanticMatches = searchResults.filter(r => r.metadata?.semanticMatch).length;
+
+    let message = '';
+
+    if (highConfidence > 0) {
+      message = `AI response enhanced with ${highConfidence} high-confidence training document(s)`;
+    } else if (mediumConfidence > 0) {
+      message = `AI response enhanced with ${mediumConfidence} medium-confidence training document(s)`;
+    } else if (lowConfidence > 0) {
+      message = `AI response enhanced with ${lowConfidence} lower-confidence but relevant training document(s)`;
+    } else {
+      message = `AI response enhanced with ${searchResults.length} training document(s)`;
+    }
+
+    if (semanticMatches > 0) {
+      message += ` (${semanticMatches} semantic match${semanticMatches > 1 ? 'es' : ''})`;
+    }
+
+    return message + '. Document references visible in metadata.';
   }
 
   private async buildConversationContext(

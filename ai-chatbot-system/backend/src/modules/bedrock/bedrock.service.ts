@@ -33,16 +33,17 @@ export class BedrockService {
     this.temperature = this.configService.get<number>('aws.bedrock.temperature') || 0.7;
   }
 
-  async invokeModel(request: ChatRequest): Promise<ChatResponse> {
+  async invokeModel(request: ChatRequest, retryCount = 0): Promise<ChatResponse> {
     const startTime = Date.now();
-    
+    const maxRetries = 3;
+
     try {
       // Check if AWS credentials are configured
       const accessKeyId = this.configService.get<string>('aws.accessKeyId');
       const secretAccessKey = this.configService.get<string>('aws.secretAccessKey');
-      
-      if (!accessKeyId || !secretAccessKey || 
-          accessKeyId === 'your_access_key' || 
+
+      if (!accessKeyId || !secretAccessKey ||
+          accessKeyId === 'your_access_key' ||
           secretAccessKey === 'your_secret_key' ||
           accessKeyId.startsWith('your_')) {
         // Return mock response for development
@@ -57,11 +58,11 @@ export class BedrockService {
           modelId: 'mock-model',
         };
       }
-      
+
       const payload = this.buildClaudePayload(request);
-      
-      this.logger.debug(`Invoking Bedrock model: ${this.modelId}`);
-      
+
+      this.logger.debug(`Invoking Bedrock model: ${this.modelId} (attempt ${retryCount + 1}/${maxRetries + 1})`);
+
       const command = new InvokeModelCommand({
         modelId: this.modelId,
         body: JSON.stringify(payload),
@@ -71,7 +72,7 @@ export class BedrockService {
 
       const response = await this.client.send(command);
       const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-      
+
       const processingTime = Date.now() - startTime;
       this.logger.log(`Claude response generated in ${processingTime}ms`);
 
@@ -98,31 +99,40 @@ export class BedrockService {
         modelId: this.modelId,
       };
     } catch (error: any) {
-      this.logger.error('Error invoking Claude model:', error.message);
+      this.logger.error(`Error invoking Claude model (attempt ${retryCount + 1}):`, error.message);
       this.logger.debug('Bedrock error details:', {
         name: error.name,
         code: error.code,
         statusCode: error.$metadata?.httpStatusCode,
         requestId: error.$metadata?.requestId,
       });
-      
+
+      // Check if we should retry for throttling errors
+      if ((error.name === 'ThrottlingException' || error.code === 'ThrottlingException') && retryCount < maxRetries) {
+        const backoffDelay = Math.pow(2, retryCount) * 1000 + Math.random() * 1000; // Exponential backoff with jitter
+        this.logger.warn(`Rate limited, retrying in ${backoffDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+
+        await new Promise(resolve => setTimeout(resolve, backoffDelay));
+        return this.invokeModel(request, retryCount + 1);
+      }
+
       // Provide more specific error messages
       let errorMessage = 'I apologize, but I am currently unable to process your request.';
-      
+
       if (error.name === 'AccessDeniedException' || error.code === 'AccessDeniedException') {
         errorMessage += ' The AWS credentials do not have permission to access Bedrock.';
       } else if (error.name === 'ResourceNotFoundException') {
         errorMessage += ' The specified Claude model is not available in your AWS region.';
       } else if (error.name === 'ValidationException') {
         errorMessage += ' The request format is invalid.';
-      } else if (error.name === 'ThrottlingException') {
-        errorMessage += ' Too many requests. Please try again in a moment.';
+      } else if (error.name === 'ThrottlingException' || error.code === 'ThrottlingException') {
+        errorMessage += ' Too many requests. The system will automatically retry, but please try again in a moment if this continues.';
       } else if (error.message?.includes('ENOTFOUND') || error.message?.includes('ECONNREFUSED')) {
         errorMessage += ' Cannot connect to AWS Bedrock service.';
       } else {
         errorMessage += ' The AI service is temporarily unavailable. Please try again later.';
       }
-      
+
       // Return fallback response instead of throwing
       return {
         content: errorMessage,

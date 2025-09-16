@@ -126,7 +126,7 @@ export class MediaService {
   }
 
   // Legacy method - keeping for backward compatibility but simplified
-  private determineMediaTypes(emotion: EmotionType, messageContent: string): string[] {
+  private determineMediaTypes(_emotion: EmotionType, _messageContent: string): string[] {
     // This method is now mainly used by getMediaForContext
     // Primary media generation always starts with an image
     return ['image'];
@@ -163,7 +163,7 @@ export class MediaService {
     }));
   }
 
-  private generateImageCaption(emotion: EmotionType, messageContent: string): string {
+  private generateImageCaption(emotion: EmotionType, _messageContent: string): string {
     const captions: Record<EmotionType, string[]> = {
       happy: [
         'Here\'s something to celebrate with! 🎉',
@@ -221,7 +221,7 @@ export class MediaService {
     return emotionCaptions[Math.floor(Math.random() * emotionCaptions.length)];
   }
 
-  private generateVideoCaption(emotion: EmotionType, messageContent: string): string {
+  private generateVideoCaption(emotion: EmotionType, _messageContent: string): string {
     const captions: Record<EmotionType, string> = {
       angry: 'Calming video to help you relax',
       fear: 'Reassuring content to ease your concerns',
@@ -238,7 +238,7 @@ export class MediaService {
     return captions[emotion] || 'Helpful video content';
   }
 
-  private getSuggestionsForEmotion(emotion: EmotionType, messageContent: string): string[] {
+  private getSuggestionsForEmotion(emotion: EmotionType, _messageContent: string): string[] {
     const suggestions: Partial<Record<EmotionType, string[]>> = {
       confused: [
         'Try breaking this down into smaller steps',
