@@ -8,8 +8,8 @@ export function useWebSocket() {
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3000';
-    
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'wss://m2m.portal-syncsoft.com';
+
     socketRef.current = io(`${wsUrl}/chat`, {
       transports: ['websocket'],
       reconnection: true,
