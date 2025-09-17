@@ -230,11 +230,11 @@ export const useChatStore = create<ChatStore>()(
               
               return {
                 id: conv.sessionId,
-                title: conv.userMessage ? 
-                  (conv.userMessage.length > 50 ? 
-                    conv.userMessage.substring(0, 50) + '...' : 
-                    conv.userMessage) : 
-                  'Chat Session',
+                title: conv.title || (conv.userMessage ?
+                  (conv.userMessage.length > 50 ?
+                    conv.userMessage.substring(0, 50) + '...' :
+                    conv.userMessage) :
+                  'Chat Session'),
                 messages: [
                   {
                     id: conv.messageId || uuidv4(),
@@ -287,9 +287,14 @@ export const useChatStore = create<ChatStore>()(
           if (conversation) {
             // Transform to local session format
             const messages: Message[] = [];
-            
-            if (Array.isArray(conversation)) {
-              conversation.forEach((msg: any) => {
+            let sessionTitle = 'Chat Session';
+
+            // Handle new response format with title
+            const conversationData = conversation.messages || conversation;
+            sessionTitle = conversation.title || sessionTitle;
+
+            if (Array.isArray(conversationData)) {
+              conversationData.forEach((msg: any) => {
                 messages.push({
                   id: uuidv4(),
                   role: 'user' as const,
@@ -304,17 +309,20 @@ export const useChatStore = create<ChatStore>()(
                   content: msg.assistantMessage,
                   timestamp: new Date(msg.createdAt),
                   metadata: msg.metadata,
+                  media: msg.metadata?.media || [], // Include media
                 });
               });
             }
 
-            // Find first user message for title
-            const firstUserMessage = messages.find(m => m.role === 'user');
-            const sessionTitle = firstUserMessage?.content ? 
-              (firstUserMessage.content.length > 50 ? 
-                firstUserMessage.content.substring(0, 50) + '...' : 
-                firstUserMessage.content) : 
-              'Chat Session';
+            // Fallback title generation if not provided
+            if (!conversation.title) {
+              const firstUserMessage = messages.find(m => m.role === 'user');
+              sessionTitle = firstUserMessage?.content ?
+                (firstUserMessage.content.length > 50 ?
+                  firstUserMessage.content.substring(0, 50) + '...' :
+                  firstUserMessage.content) :
+                'Chat Session';
+            }
 
             const session: ChatSession = {
               id: sessionId,

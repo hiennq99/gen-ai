@@ -40,13 +40,24 @@ export class ConversationsService {
 
   async getConversation(sessionId: string) {
     const history = await this.databaseService.getConversationHistory(sessionId);
-    
+
     if (!history || history.length === 0) {
       return [];
     }
 
-    // Return raw history for frontend to process
-    return history;
+    // Generate title from first user message
+    const firstUserMessage = history[0]?.userMessage;
+    const title = firstUserMessage ?
+      (firstUserMessage.length > 50 ?
+        firstUserMessage.substring(0, 50) + '...' :
+        firstUserMessage) :
+      'Chat Session';
+
+    // Return history with title
+    return {
+      title,
+      messages: history,
+    };
   }
 
   async exportConversations(filters: any) {
@@ -103,8 +114,17 @@ export class ConversationsService {
       const endTime = new Date(convs[convs.length - 1].createdAt);
       const duration = (endTime.getTime() - startTime.getTime()) / 1000; // in seconds
 
+      // Generate title from first user message
+      const firstUserMessage = convs[0].userMessage;
+      const title = firstUserMessage ?
+        (firstUserMessage.length > 50 ?
+          firstUserMessage.substring(0, 50) + '...' :
+          firstUserMessage) :
+        'Chat Session';
+
       return {
         sessionId,
+        title,
         userId: convs[0].userId,
         messageCount: convs.length * 2, // user + assistant messages
         dominantEmotion,
@@ -130,6 +150,7 @@ export class ConversationsService {
         content: conv.assistantMessage,
         timestamp: new Date(new Date(conv.createdAt).getTime() + (conv.processingTime || 1000)).toISOString(),
         confidence: conv.confidence,
+        media: conv.metadata?.media || [], // Include media from metadata
       },
     ]).flat();
   }

@@ -222,6 +222,7 @@ export class ChatService {
           metadata: {
             mode: 'exact-match',
             documentId: bestMatch.documentId,
+            media: dummyMedia, // Include media in metadata
           },
         });
         
@@ -287,6 +288,7 @@ export class ChatService {
           processingTime: Date.now() - startTime,
           metadata: {
             mode: 'training-only-no-match',
+            media: dummyMedia, // Include media in metadata
           },
         });
 
@@ -354,6 +356,7 @@ export class ChatService {
         processingTime: Date.now() - startTime,
         metadata: {
           mode: 'training-only-no-match',
+          media: dummyMedia, // Include media in metadata
         },
       });
 

@@ -8,6 +8,60 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { format } from 'date-fns';
 
+// Default image utility function
+const getDefaultImage = (emotion?: string, content?: string) => {
+  // Define default images based on emotion
+  const emotionImages = {
+    happy: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=400&h=300&fit=crop',
+    sad: 'https://images.unsplash.com/photo-1493836512294-502baa1986e2?w=400&h=300&fit=crop',
+    angry: 'https://images.unsplash.com/photo-1542751110-97427bbecf20?w=400&h=300&fit=crop',
+    fear: 'https://images.unsplash.com/photo-1544725121-be3bf52e2dc8?w=400&h=300&fit=crop',
+    anxious: 'https://images.unsplash.com/photo-1544725121-be3bf52e2dc8?w=400&h=300&fit=crop',
+    surprise: 'https://images.unsplash.com/photo-1513475382585-d06e58bcb0e0?w=400&h=300&fit=crop',
+    grateful: 'https://images.unsplash.com/photo-1532635270-c2e3a9cd827a?w=400&h=300&fit=crop',
+    confused: 'https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=400&h=300&fit=crop',
+    urgent: 'https://images.unsplash.com/photo-1551698618-1dfe5d97d256?w=400&h=300&fit=crop',
+    neutral: 'https://picsum.photos/400/300?random=50',
+  };
+
+  // Get emotion-based image
+  if (emotion && emotionImages[emotion as keyof typeof emotionImages]) {
+    return {
+      url: emotionImages[emotion as keyof typeof emotionImages],
+      caption: `Calming image for ${emotion} feeling`
+    };
+  }
+
+  // Content-based fallback
+  if (content) {
+    const lowerContent = content.toLowerCase();
+    if (lowerContent.includes('prayer') || lowerContent.includes('dua') || lowerContent.includes('allah')) {
+      return {
+        url: 'https://images.unsplash.com/photo-1532635270-c2e3a9cd827a?w=400&h=300&fit=crop',
+        caption: 'Islamic spiritual image'
+      };
+    }
+    if (lowerContent.includes('anxiety') || lowerContent.includes('worry')) {
+      return {
+        url: 'https://images.unsplash.com/photo-1544725121-be3bf52e2dc8?w=400&h=300&fit=crop',
+        caption: 'Calming nature scene'
+      };
+    }
+    if (lowerContent.includes('breathe') || lowerContent.includes('breathing')) {
+      return {
+        url: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&h=300&fit=crop',
+        caption: 'Peaceful breathing space'
+      };
+    }
+  }
+
+  // Default fallback
+  return {
+    url: 'https://picsum.photos/400/300?random=99',
+    caption: 'Related image'
+  };
+};
+
 interface MessageItemProps {
   message: Message;
 }
@@ -170,25 +224,60 @@ export default function MessageItem({ message }: MessageItemProps) {
           )}
 
           {/* Media Attachments */}
-          {message.media && message.media.length > 0 && (
+          {!isUser && (
             <div className="mt-2 space-y-2">
-              {message.media.map((media, index) => (
-                <div key={index}>
-                  {media.type === 'image' && media.url && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={media.url}
-                      alt={media.caption || 'Attachment'}
-                      className="rounded-lg max-w-full"
-                    />
-                  )}
-                  {media.type === 'suggestion' && (
-                    <div className="bg-white/10 rounded p-2 text-sm">
-                      {media.content}
+              {/* Show provided media if available */}
+              {message.media && message.media.length > 0 ? (
+                message.media.map((media, index) => (
+                  <div key={index}>
+                    {media.type === 'image' && media.url && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={media.url}
+                        alt={media.caption || 'Attachment'}
+                        className="rounded-lg max-w-full"
+                        onError={(e) => {
+                          // Fallback to default image if provided media fails to load
+                          const target = e.target as HTMLImageElement;
+                          const defaultImage = getDefaultImage(
+                            message.emotion || message.emotionTags?.inputEmotions?.[0],
+                            message.content
+                          );
+                          target.src = defaultImage.url;
+                        }}
+                      />
+                    )}
+                    {media.type === 'suggestion' && (
+                      <div className="bg-white/10 rounded p-2 text-sm">
+                        {media.content}
+                      </div>
+                    )}
+                  </div>
+                ))
+              ) : (
+                /* Default image if no media provided */
+                (() => {
+                  const defaultImage = getDefaultImage(
+                    message.emotion || message.emotionTags?.inputEmotions?.[0],
+                    message.content
+                  );
+                  return (
+                    <div>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={defaultImage.url}
+                        alt={defaultImage.caption}
+                        className="rounded-lg max-w-full opacity-90"
+                        onError={(e) => {
+                          // Fallback to a simple placeholder if image fails to load
+                          const target = e.target as HTMLImageElement;
+                          target.src = 'https://picsum.photos/400/300?random=1';
+                        }}
+                      />
                     </div>
-                  )}
-                </div>
-              ))}
+                  );
+                })()
+              )}
             </div>
           )}
         </div>
