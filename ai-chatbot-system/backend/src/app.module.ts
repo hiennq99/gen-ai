@@ -18,6 +18,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { SpiritualGuidanceModule } from './modules/spiritual-guidance/spiritual-guidance.module';
 import configuration from './config/configuration';
 
 @Module({
@@ -48,6 +49,7 @@ import configuration from './config/configuration';
     AnalyticsModule,
     ConversationsModule,
     SettingsModule,
+    SpiritualGuidanceModule,
   ],
 })
 export class AppModule {}

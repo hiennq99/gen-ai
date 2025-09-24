@@ -10,6 +10,7 @@ import { DatabaseModule } from '../database/database.module';
 import { CacheModule } from '../cache/cache.module';
 import { PersonalityModule } from '../personality/personality.module';
 import { MediaModule } from '../media/media.module';
+import { SpiritualGuidanceModule } from '../spiritual-guidance/spiritual-guidance.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { MediaModule } from '../media/media.module';
     CacheModule,
     PersonalityModule,
     MediaModule,
+    SpiritualGuidanceModule,
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway],

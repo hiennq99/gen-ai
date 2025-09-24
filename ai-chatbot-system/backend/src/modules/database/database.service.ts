@@ -9,7 +9,7 @@ export class DatabaseService implements OnModuleInit {
   private docClient: DynamoDBDocumentClient;
   private isConfigured: boolean = false;
   private inMemoryStore: Map<string, any[]> = new Map();
-  private tables: {
+  private tables: Record<string, string> & {
     conversations: string;
     documents: string;
     training: string;
@@ -728,6 +728,204 @@ export class DatabaseService implements OnModuleInit {
       this.logger.error('Error updating user profile:', error);
       return { success: false, error };
     }
+  }
+
+  // Generic CRUD methods for spiritual guidance admin
+  async createItem(tableName: string, item: any) {
+    const tableKey = this.getTableKey(tableName);
+
+    if (!this.isConfigured) {
+      const items = this.inMemoryStore.get(tableName) || [];
+      const newItem = {
+        ...item,
+        id: item.id || `${tableName}-${Date.now()}`,
+        createdAt: Date.now(),
+        createdAtISO: new Date().toISOString(),
+      };
+      items.push(newItem);
+      this.inMemoryStore.set(tableName, items);
+      return { success: true, data: newItem };
+    }
+
+    try {
+      const command = new PutCommand({
+        TableName: this.tables[tableKey] || tableName,
+        Item: {
+          ...item,
+          id: item.id || `${tableName}-${Date.now()}`,
+          createdAt: Date.now(),
+          createdAtISO: new Date().toISOString(),
+        },
+      });
+      const result = await this.docClient.send(command);
+      return { success: true, data: result };
+    } catch (error: any) {
+      this.logger.error(`Error creating item in ${tableName}:`, error);
+      // Fallback to in-memory
+      const items = this.inMemoryStore.get(tableName) || [];
+      const newItem = {
+        ...item,
+        id: item.id || `${tableName}-${Date.now()}`,
+        createdAt: Date.now(),
+        createdAtISO: new Date().toISOString(),
+      };
+      items.push(newItem);
+      this.inMemoryStore.set(tableName, items);
+      return { success: true, data: newItem };
+    }
+  }
+
+  async getItem(tableName: string, id: string) {
+    const tableKey = this.getTableKey(tableName);
+
+    if (!this.isConfigured) {
+      const items = this.inMemoryStore.get(tableName) || [];
+      return items.find((item: any) => item.id === id);
+    }
+
+    try {
+      const command = new GetCommand({
+        TableName: this.tables[tableKey] || tableName,
+        Key: { id },
+      });
+      const response = await this.docClient.send(command);
+      return response.Item;
+    } catch (error: any) {
+      this.logger.error(`Error getting item from ${tableName}:`, error);
+      // Fallback to in-memory
+      const items = this.inMemoryStore.get(tableName) || [];
+      return items.find((item: any) => item.id === id);
+    }
+  }
+
+  async updateItem(tableName: string, id: string, updates: any) {
+    const tableKey = this.getTableKey(tableName);
+
+    if (!this.isConfigured) {
+      const items = this.inMemoryStore.get(tableName) || [];
+      const itemIndex = items.findIndex((item: any) => item.id === id);
+      if (itemIndex !== -1) {
+        items[itemIndex] = { ...items[itemIndex], ...updates, updatedAt: new Date().toISOString() };
+        this.inMemoryStore.set(tableName, items);
+        return { success: true, data: items[itemIndex] };
+      }
+      return { success: false, error: 'Item not found' };
+    }
+
+    try {
+      const updateExpression = Object.keys(updates).map(key => `${key} = :${key}`).join(', ');
+      const expressionAttributeValues = Object.keys(updates).reduce((acc, key) => {
+        acc[`:${key}`] = updates[key];
+        return acc;
+      }, {} as any);
+
+      expressionAttributeValues[':updatedAt'] = new Date().toISOString();
+
+      const command = new UpdateCommand({
+        TableName: this.tables[tableKey] || tableName,
+        Key: { id },
+        UpdateExpression: `SET ${updateExpression}, updatedAt = :updatedAt`,
+        ExpressionAttributeValues: expressionAttributeValues,
+        ReturnValues: 'ALL_NEW',
+      });
+
+      const result = await this.docClient.send(command);
+      return { success: true, data: result.Attributes };
+    } catch (error: any) {
+      this.logger.error(`Error updating item in ${tableName}:`, error);
+      // Fallback to in-memory
+      const items = this.inMemoryStore.get(tableName) || [];
+      const itemIndex = items.findIndex((item: any) => item.id === id);
+      if (itemIndex !== -1) {
+        items[itemIndex] = { ...items[itemIndex], ...updates, updatedAt: new Date().toISOString() };
+        this.inMemoryStore.set(tableName, items);
+        return { success: true, data: items[itemIndex] };
+      }
+      return { success: false, error: 'Item not found' };
+    }
+  }
+
+  async deleteItem(tableName: string, id: string) {
+    const tableKey = this.getTableKey(tableName);
+
+    if (!this.isConfigured) {
+      const items = this.inMemoryStore.get(tableName) || [];
+      const filteredItems = items.filter((item: any) => item.id !== id);
+      this.inMemoryStore.set(tableName, filteredItems);
+      return { success: true };
+    }
+
+    try {
+      const command = new DeleteCommand({
+        TableName: this.tables[tableKey] || tableName,
+        Key: { id },
+      });
+      await this.docClient.send(command);
+      return { success: true };
+    } catch (error: any) {
+      this.logger.error(`Error deleting item from ${tableName}:`, error);
+      // Fallback to in-memory
+      const items = this.inMemoryStore.get(tableName) || [];
+      const filteredItems = items.filter((item: any) => item.id !== id);
+      this.inMemoryStore.set(tableName, filteredItems);
+      return { success: true };
+    }
+  }
+
+  async queryItems(tableName: string, filters: any = {}) {
+    const tableKey = this.getTableKey(tableName);
+
+    if (!this.isConfigured) {
+      const items = this.inMemoryStore.get(tableName) || [];
+      // Apply basic filtering
+      return items.filter((item: any) => {
+        return Object.keys(filters).every(key => {
+          if (!filters[key]) return true;
+          return item[key] && item[key].toString().toLowerCase().includes(filters[key].toString().toLowerCase());
+        });
+      });
+    }
+
+    try {
+      const command = new ScanCommand({
+        TableName: this.tables[tableKey] || tableName,
+        Limit: filters.limit || 100,
+      });
+
+      const response = await this.docClient.send(command);
+      let items = response.Items || [];
+
+      // Apply client-side filtering
+      if (Object.keys(filters).length > 0) {
+        items = items.filter((item: any) => {
+          return Object.keys(filters).every(key => {
+            if (!filters[key] || key === 'limit') return true;
+            return item[key] && item[key].toString().toLowerCase().includes(filters[key].toString().toLowerCase());
+          });
+        });
+      }
+
+      return items;
+    } catch (error: any) {
+      this.logger.error(`Error querying items from ${tableName}:`, error);
+      // Fallback to in-memory
+      const items = this.inMemoryStore.get(tableName) || [];
+      return items.filter((item: any) => {
+        return Object.keys(filters).every(key => {
+          if (!filters[key]) return true;
+          return item[key] && item[key].toString().toLowerCase().includes(filters[key].toString().toLowerCase());
+        });
+      });
+    }
+  }
+
+  private getTableKey(tableName: string): string {
+    const tableMap: Record<string, string> = {
+      'spiritual_diseases': 'training',
+      'handbook_content': 'training',
+      'training_data': 'training',
+    };
+    return tableMap[tableName] || 'training';
   }
 
   // Removed hardcoded Q&A data - now using pure vector database approach with DynamoDB

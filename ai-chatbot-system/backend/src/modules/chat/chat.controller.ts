@@ -22,6 +22,18 @@ export class ChatController {
     });
   }
 
+  @Post('spiritual-guidance')
+  @ApiOperation({ summary: 'Send a message and get spiritual guidance response' })
+  @ApiResponse({ status: 200, description: 'Spiritual guidance response', type: ChatResponseDto })
+  async sendSpiritualGuidanceMessage(@Body() dto: ChatRequestDto) {
+    return await this.chatService.processSpiritualGuidanceMessage({
+      message: dto.message,
+      sessionId: dto.sessionId,
+      userId: dto.userId,
+      metadata: dto.metadata,
+    });
+  }
+
   @Post('session/create')
   @ApiOperation({ summary: 'Create a new chat session' })
   @ApiBearerAuth()

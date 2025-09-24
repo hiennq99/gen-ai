@@ -41,6 +41,12 @@ export const chatService = {
     return response.data;
   },
 
+  async sendSpiritualGuidanceMessage(request: ChatRequest): Promise<ChatResponse> {
+    // Use the spiritual guidance chat endpoint
+    const response = await api.post<ChatResponse>('/chat/spiritual-guidance', request);
+    return response.data;
+  },
+
   async createSession(userId: string) {
     const response = await api.post('/chat/session/create', { userId });
     return response.data;

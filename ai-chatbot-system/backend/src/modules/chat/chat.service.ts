@@ -7,6 +7,7 @@ import { DatabaseService } from '../database/database.service';
 import { CacheService } from '../cache/cache.service';
 import { PersonalityService } from '../personality/personality.service';
 import { MediaService } from '../media/media.service';
+import { SpiritualGuidanceService } from '../spiritual-guidance/spiritual-guidance.service';
 import type { ConversationContext } from '../personality/personality.service';
 import { ChatRequest, ChatResponse, ChatSession } from './interfaces/chat.interface';
 import { v4 as uuidv4 } from 'uuid';
@@ -26,6 +27,7 @@ export class ChatService {
     private readonly cacheService: CacheService,
     private readonly personalityService: PersonalityService,
     private readonly mediaService: MediaService,
+    private readonly spiritualGuidanceService: SpiritualGuidanceService,
   ) {}
 
   private formatAnswerText(text: string): string {
@@ -753,6 +755,161 @@ export class ChatService {
     } catch (error) {
       this.logger.debug('User profile not found, using defaults');
       return null;
+    }
+  }
+
+  async processSpiritualGuidanceMessage(request: ChatRequest): Promise<ChatResponse> {
+    const startTime = Date.now();
+    const messageId = uuidv4();
+
+    try {
+      this.logger.log('Processing spiritual guidance message');
+
+      // Get conversation history for context
+      const conversationHistory = await this.getConversationHistory(request.sessionId || '');
+      const historyMessages = conversationHistory?.map(h => h.userMessage) || [];
+
+      // Create spiritual guidance request
+      const guidanceRequest = {
+        message: request.message,
+        conversationHistory: historyMessages.slice(-5), // Last 5 messages for context
+      };
+
+      // Get spiritual guidance response
+      const guidanceResponse = await this.spiritualGuidanceService.provideSpiritualGuidance(guidanceRequest);
+
+      // Create enhanced response with citations
+      let responseContent = guidanceResponse.response;
+
+      // Add citation information if available
+      if (guidanceResponse.citations.length > 0) {
+        responseContent += '\n\n📚 **References from A Handbook of Spiritual Medicine:**\n';
+
+        guidanceResponse.citations.forEach((citation, index) => {
+          responseContent += `• Page ${citation.page}: "${citation.quote}"\n`;
+        });
+
+        if (guidanceResponse.spiritualDisease) {
+          responseContent += `\n🔍 **Related Topic:** ${guidanceResponse.spiritualDisease.name} (${guidanceResponse.spiritualDisease.arabicName})\n`;
+          responseContent += `📖 **Chapter:** Pages ${guidanceResponse.spiritualDisease.pageRange}`;
+        }
+      }
+
+      // Determine emotion based on spiritual guidance analysis
+      const emotion = guidanceResponse.spiritualDisease?.name.toLowerCase() || 'spiritual-guidance';
+
+      // Generate media suggestions based on spiritual context
+      const media = await this.generateSpiritualMedia(
+        guidanceResponse.spiritualDisease?.name || 'general',
+        guidanceResponse.citationLevel
+      );
+
+      const response: ChatResponse = {
+        id: messageId,
+        content: responseContent,
+        media,
+        emotion: emotion as any,
+        confidence: this.mapCitationLevelToConfidence(guidanceResponse.citationLevel),
+        processingTime: Date.now() - startTime,
+        metadata: {
+          sessionId: request.sessionId,
+          type: 'spiritual-guidance',
+          citationLevel: guidanceResponse.citationLevel,
+          spiritualDisease: guidanceResponse.spiritualDisease?.name,
+          citationCount: guidanceResponse.citations.length,
+          templateUsed: guidanceResponse.templateUsed,
+          spiritualGuidance: true,
+          emotionAnalysis: {
+            primaryEmotion: emotion,
+            confidence: this.mapCitationLevelToConfidence(guidanceResponse.citationLevel),
+            spiritualContext: true,
+          },
+        },
+      };
+
+      // Save conversation with spiritual guidance metadata
+      await this.saveConversation({
+        messageId,
+        sessionId: request.sessionId!,
+        userId: request.userId!,
+        userMessage: request.message,
+        assistantMessage: responseContent,
+        emotion: { primaryEmotion: emotion, confidence: response.confidence },
+        processingTime: Date.now() - startTime,
+        metadata: {
+          type: 'spiritual-guidance',
+          citationLevel: guidanceResponse.citationLevel,
+          spiritualDisease: guidanceResponse.spiritualDisease?.name,
+          citations: guidanceResponse.citations.map(c => ({ page: c.page, context: c.context })),
+        },
+      });
+
+      this.logger.log('Spiritual guidance response generated', {
+        citationLevel: guidanceResponse.citationLevel,
+        citationCount: guidanceResponse.citations.length,
+        processingTime: Date.now() - startTime,
+      });
+
+      return response;
+    } catch (error) {
+      this.logger.error('Failed to process spiritual guidance message', error);
+
+      // Fallback to regular processing
+      return this.processMessage(request);
+    }
+  }
+
+  private async generateSpiritualMedia(spiritualDisease: string, citationLevel: string): Promise<any[]> {
+    try {
+      const mediaItems = [];
+
+      // Generate appropriate media based on spiritual disease
+      const mediaMap: Record<string, any[]> = {
+        'anger': [
+          { type: 'image', description: 'Calming nature scene for anger management', mood: 'peaceful' },
+          { type: 'audio', description: 'Dhikr for controlling anger', category: 'spiritual' }
+        ],
+        'envy': [
+          { type: 'image', description: 'Gratitude and contentment imagery', mood: 'grateful' },
+          { type: 'video', description: 'Teaching about being content with Allah\'s decree', category: 'educational' }
+        ],
+        'hard-heartedness': [
+          { type: 'image', description: 'Heart purification imagery', mood: 'reflective' },
+          { type: 'audio', description: 'Quran recitation for softening the heart', category: 'spiritual' }
+        ],
+        'general': [
+          { type: 'image', description: 'Islamic spiritual guidance imagery', mood: 'peaceful' }
+        ]
+      };
+
+      const diseaseMedia = mediaMap[spiritualDisease.toLowerCase()] || mediaMap['general'];
+
+      for (const mediaItem of diseaseMedia) {
+        const generatedMedia = await this.mediaService.generateDummyMedia(
+          'neutral' as any,
+          'spiritual guidance request',
+          true
+        );
+
+        if (generatedMedia) {
+          mediaItems.push(generatedMedia);
+        }
+      }
+
+      return mediaItems.slice(0, 2); // Limit to 2 media items
+    } catch (error) {
+      this.logger.warn('Failed to generate spiritual media', error);
+      return [];
+    }
+  }
+
+  private mapCitationLevelToConfidence(citationLevel: string): number {
+    switch (citationLevel) {
+      case 'perfect_match': return 95;
+      case 'related_theme': return 80;
+      case 'general_guidance': return 65;
+      case 'no_direct_match': return 40;
+      default: return 50;
     }
   }
 }
