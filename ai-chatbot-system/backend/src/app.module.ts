@@ -4,7 +4,6 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { ChatModule } from './modules/chat/chat.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { TrainingModule } from './modules/training/training.module';
-import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { EmotionModule } from './modules/emotion/emotion.module';
 import { BedrockModule } from './modules/bedrock/bedrock.module';
 import { DatabaseModule } from './modules/database/database.module';
@@ -14,8 +13,6 @@ import { QueueModule } from './modules/queue/queue.module';
 import { SearchModule } from './modules/search/search.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
-import { DashboardModule } from './modules/dashboard/dashboard.module';
-import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { SpiritualGuidanceModule } from './modules/spiritual-guidance/spiritual-guidance.module';
@@ -42,11 +39,8 @@ import configuration from './config/configuration';
     ChatModule,
     DocumentsModule,
     TrainingModule,
-    WebhooksModule,
     AuthModule,
     HealthModule,
-    DashboardModule,
-    AnalyticsModule,
     ConversationsModule,
     SettingsModule,
     SpiritualGuidanceModule,

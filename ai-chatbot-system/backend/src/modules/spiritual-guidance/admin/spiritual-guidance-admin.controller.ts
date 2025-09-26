@@ -7,14 +7,14 @@ import {
   Body,
   Param,
   Query,
-  UseGuards,
   UseInterceptors,
   UploadedFile,
+  UploadedFiles,
   Logger,
   BadRequestException,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { SpiritualGuidanceAdminService } from './spiritual-guidance-admin.service';
 import { CitationService } from '../citation.service';
 import { QualityControlService } from '../quality-control.service';
@@ -379,6 +379,92 @@ export class SpiritualGuidanceAdminController {
       };
     } catch (error) {
       this.logger.error('Failed to sync training data', error);
+      throw error;
+    }
+  }
+
+  // New endpoints for hybrid approach
+
+  @Post('training/upload')
+  @ApiOperation({ summary: 'Upload training documents (PDF, DOCX, TXT)' })
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadTrainingDocument(
+    @UploadedFile() file: Express.Multer.File,
+    @Query('category') category: 'handbook' | 'qa' | 'general' = 'general'
+  ) {
+    if (!file) {
+      throw new BadRequestException('File is required');
+    }
+
+    try {
+      const result = await this.adminService.processTrainingFile(file, category);
+      return result;
+    } catch (error) {
+      this.logger.error('Failed to upload training document', error);
+      throw error;
+    }
+  }
+
+  @Post('training/upload-multiple')
+  @ApiOperation({ summary: 'Upload multiple training documents' })
+  @UseInterceptors(FilesInterceptor('files', 10))
+  async uploadMultipleTrainingDocuments(
+    @UploadedFiles() files: Express.Multer.File[],
+    @Query('category') category: 'handbook' | 'qa' | 'general' = 'general'
+  ) {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('At least one file is required');
+    }
+
+    try {
+      const result = await this.adminService.processMultipleTrainingFiles(files, category);
+      return result;
+    } catch (error) {
+      this.logger.error('Failed to upload multiple training documents', error);
+      throw error;
+    }
+  }
+
+  @Get('training/search')
+  @ApiOperation({ summary: 'Search processed training documents' })
+  async searchTrainingDocuments(
+    @Query('query') query: string,
+    @Query('limit') limit?: number,
+    @Query('categories') categories?: string,
+    @Query('minSimilarity') minSimilarity?: number
+  ) {
+    if (!query) {
+      throw new BadRequestException('Search query is required');
+    }
+
+    try {
+      const options: any = {};
+      if (limit) options.limit = parseInt(limit.toString());
+      if (categories) options.categories = categories.split(',');
+      if (minSimilarity) options.minSimilarity = parseFloat(minSimilarity.toString());
+
+      const result = await this.adminService.searchProcessedDocuments(query, options);
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      this.logger.error('Failed to search training documents', error);
+      throw error;
+    }
+  }
+
+  @Get('training/stats')
+  @ApiOperation({ summary: 'Get training document statistics' })
+  async getTrainingStats() {
+    try {
+      const stats = await this.adminService.getTrainingDocumentStats();
+      return {
+        success: true,
+        data: stats
+      };
+    } catch (error) {
+      this.logger.error('Failed to get training stats', error);
       throw error;
     }
   }

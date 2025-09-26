@@ -57,10 +57,11 @@ export class QualityControlService {
 
   private async performQualityChecks(
     response: SpiritualGuidanceResponse,
-    originalMessage: string,
-    emotionalState?: EmotionalState
+    _originalMessage: string,
+    _emotionalState?: EmotionalState
   ): Promise<QualityChecklist> {
-    const responseText = response.response.toLowerCase();
+    // Analyze response quality
+    // const responseText = response.response.toLowerCase();
 
     return {
       hasEmotionalAcknowledgment: this.checkEmotionalAcknowledgment(response.response),

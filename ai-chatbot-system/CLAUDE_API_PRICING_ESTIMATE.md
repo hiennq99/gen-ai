@@ -250,20 +250,19 @@ private calculateCost(usage: any): number {
 - **Estimated Revenue**: $10,000-15,000/month
 - **Best for**: Variable usage patterns
 
-### Infrastructure Scaling Considerations for 5,000 Users
+### Basic Infrastructure Costs
 
 #### Required AWS Resources
 - **DynamoDB**: ~$50-100/month (on-demand pricing)
-- **S3 Storage**: ~$25-50/month 
+- **S3 Storage**: ~$25-50/month
 - **OpenSearch**: ~$200-400/month (t3.medium.search instance)
 - **Redis Cache**: ~$50-100/month (cache.t3.micro)
-- **CloudFront CDN**: ~$50-100/month
-- **Total Infrastructure**: ~$375-750/month
+- **Total Infrastructure**: ~$325-650/month
 
 ### Total Operating Costs (5,000 users)
 - **Claude API**: $630-1,825/month
-- **AWS Infrastructure**: $375-750/month
-- **Total**: $1,005-2,575/month
+- **AWS Infrastructure**: $325-650/month
+- **Total**: $955-2,475/month
 - **Cost per user**: $0.20-0.52/month
 
 ## Conclusion

@@ -1,12 +1,11 @@
 import { Module, Global } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { BedrockService } from './bedrock.service';
-import { BedrockController } from './bedrock.controller';
 
 @Global()
 @Module({
   imports: [ConfigModule],
-  controllers: [BedrockController],
+  controllers: [],
   providers: [BedrockService],
   exports: [BedrockService],
 })

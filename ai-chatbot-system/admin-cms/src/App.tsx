@@ -7,7 +7,6 @@ import Dashboard from './pages/Dashboard';
 import Documents from './pages/Documents';
 import Training from './pages/Training';
 import Conversations from './pages/Conversations';
-import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 import { useAuth } from './hooks/useAuth';
@@ -51,7 +50,6 @@ function App() {
             <Route path="/documents" element={<Documents />} />
             <Route path="/training" element={<Training />} />
             <Route path="/conversations" element={<Conversations />} />
-            <Route path="/analytics" element={<Analytics />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </Content>

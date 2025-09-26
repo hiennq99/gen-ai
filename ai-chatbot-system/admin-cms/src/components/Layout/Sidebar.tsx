@@ -5,7 +5,6 @@ import {
   FileTextOutlined,
   ExperimentOutlined,
   MessageOutlined,
-  BarChartOutlined,
   SettingOutlined,
   RobotOutlined,
 } from '@ant-design/icons';
@@ -36,11 +35,6 @@ const menuItems = [
     key: '/conversations',
     icon: <MessageOutlined />,
     label: 'Conversations',
-  },
-  {
-    key: '/analytics',
-    icon: <BarChartOutlined />,
-    label: 'Analytics',
   },
   {
     key: '/settings',

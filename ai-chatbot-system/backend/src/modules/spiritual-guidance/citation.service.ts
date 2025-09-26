@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { CacheService } from '../cache/cache.service';
+import { DocumentSearchService, DocumentMatch } from './document-search.service';
 import {
   SpiritualDisease,
   DirectQuote,
@@ -8,6 +9,13 @@ import {
   EmotionalState,
   ResponseTemplate,
 } from './interfaces/spiritual-guidance.interface';
+
+// Enhanced interfaces for hybrid approach
+export interface HybridCitationMatch extends CitationMatch {
+  documentMatches?: DocumentMatch[];
+  sourceTypes: ('structured' | 'documents' | 'ai_knowledge')[];
+  combinedConfidence: number;
+}
 
 @Injectable()
 export class CitationService {
@@ -18,6 +26,7 @@ export class CitationService {
   constructor(
     private readonly databaseService: DatabaseService,
     private readonly cacheService: CacheService,
+    private readonly documentSearchService: DocumentSearchService,
   ) {
     this.initializeSpiritualDiseases();
     this.initializeResponseTemplates();
@@ -171,8 +180,8 @@ If you'd like, I can share what the Handbook says about {relatedTopic} which mig
     });
   }
 
-  async findCitationMatch(emotionalState: EmotionalState, message: string): Promise<CitationMatch> {
-    const cacheKey = `citation:${JSON.stringify(emotionalState)}:${message.slice(0, 50)}`;
+  async findCitationMatch(emotionalState: EmotionalState, message: string): Promise<HybridCitationMatch> {
+    const cacheKey = `hybrid-citation:${JSON.stringify(emotionalState)}:${message.slice(0, 50)}`;
 
     try {
       const cached = await this.cacheService.get(cacheKey);
@@ -180,27 +189,43 @@ If you'd like, I can share what the Handbook says about {relatedTopic} which mig
         return JSON.parse(cached);
       }
     } catch (error) {
-      this.logger.warn('Cache miss for citation match', error);
+      this.logger.warn('Cache miss for hybrid citation match', error);
     }
 
-    const match = this.performCitationMatch(emotionalState, message);
+    const match = await this.performHybridCitationMatch(emotionalState, message);
 
     // Cache for 1 hour
     try {
       await this.cacheService.set(cacheKey, JSON.stringify(match), 3600);
     } catch (error) {
-      this.logger.warn('Failed to cache citation match', error);
+      this.logger.warn('Failed to cache hybrid citation match', error);
     }
 
     return match;
   }
 
-  private performCitationMatch(emotionalState: EmotionalState, message: string): CitationMatch {
+  private async performHybridCitationMatch(emotionalState: EmotionalState, message: string): Promise<HybridCitationMatch> {
+    this.logger.log('Performing hybrid citation match', {
+      emotion: emotionalState.primaryEmotion,
+      messageLength: message.length
+    });
+
+    // Step 1: Search structured spiritual diseases (existing logic)
+    const structuredMatch = this.performStructuredCitationMatch(emotionalState, message);
+
+    // Step 2: Search uploaded training documents
+    const documentSearch = await this.searchTrainingDocuments(message, emotionalState);
+
+    // Step 3: Combine results and determine best match
+    return this.combineMatchResults(structuredMatch, documentSearch, emotionalState, message);
+  }
+
+  private performStructuredCitationMatch(emotionalState: EmotionalState, message: string): CitationMatch {
     const primaryEmotion = emotionalState.primaryEmotion.toLowerCase();
     const messageLower = message.toLowerCase();
 
     // Level 1: Perfect Match - Direct emotion to spiritual disease mapping
-    for (const [key, disease] of this.spiritualDiseases) {
+    for (const [_key, disease] of this.spiritualDiseases) {
       if (disease.emotionalTriggers.some(trigger =>
         messageLower.includes(trigger) || primaryEmotion.includes(trigger)
       )) {
@@ -214,7 +239,7 @@ If you'd like, I can share what the Handbook says about {relatedTopic} which mig
     }
 
     // Level 2: Related Theme - Semantic similarity
-    for (const [key, disease] of this.spiritualDiseases) {
+    for (const [_key, disease] of this.spiritualDiseases) {
       const semanticMatch = this.calculateSemanticSimilarity(
         emotionalState,
         message,
@@ -274,7 +299,7 @@ If you'd like, I can share what the Handbook says about {relatedTopic} which mig
     return Math.min(score, 1.0);
   }
 
-  private findMostRelevantQuotes(message: string, emotionalState: EmotionalState): DirectQuote[] {
+  private findMostRelevantQuotes(message: string, _emotionalState: EmotionalState): DirectQuote[] {
     const allQuotes: DirectQuote[] = [];
 
     this.spiritualDiseases.forEach(disease => {
@@ -294,6 +319,120 @@ If you'd like, I can share what the Handbook says about {relatedTopic} which mig
     });
 
     return relevantQuotes.slice(0, 3); // Return top 3 most relevant
+  }
+
+  /**
+   * Search uploaded training documents for relevant content
+   */
+  private async searchTrainingDocuments(message: string, _emotionalState: EmotionalState) {
+    try {
+      const searchResult = await this.documentSearchService.searchDocuments(message, {
+        limit: 5,
+        minSimilarity: 0.3,
+        categories: ['handbook', 'qa', 'general'],
+        includeMetadata: true
+      });
+
+      this.logger.log('Document search completed', {
+        matches: searchResult.documentMatches.length,
+        processingTime: searchResult.processingTime
+      });
+
+      return searchResult;
+    } catch (error) {
+      this.logger.error('Training document search failed', error);
+      return {
+        documentMatches: [],
+        totalMatches: 0,
+        searchQuery: message,
+        processingTime: 0
+      };
+    }
+  }
+
+  /**
+   * Combine structured data and document search results
+   */
+  private combineMatchResults(
+    structuredMatch: CitationMatch,
+    documentSearch: any,
+    _emotionalState: EmotionalState,
+    _message: string
+  ): HybridCitationMatch {
+    const sourceTypes: ('structured' | 'documents' | 'ai_knowledge')[] = [];
+    let combinedLevel = structuredMatch.level;
+    let combinedConfidence = structuredMatch.confidence;
+    let finalQuotes = [...structuredMatch.relevantQuotes];
+    const finalDisease = structuredMatch.spiritualDisease;
+
+    // If we have document matches, enhance the response
+    if (documentSearch.documentMatches.length > 0) {
+      sourceTypes.push('documents');
+
+      // Convert document matches to DirectQuote format
+      const documentQuotes: DirectQuote[] = documentSearch.documentMatches.map((match: DocumentMatch) => ({
+        page: match.chunk.page || 0,
+        quote: match.chunk.content.slice(0, 200) + (match.chunk.content.length > 200 ? '...' : ''),
+        context: 'document' as any,
+        source: match.chunk.source,
+        relevanceScore: match.relevanceScore
+      }));
+
+      finalQuotes = [...finalQuotes, ...documentQuotes];
+
+      // Adjust confidence based on document matches
+      const avgDocumentRelevance = documentSearch.documentMatches.reduce(
+        (sum: number, match: DocumentMatch) => sum + match.relevanceScore, 0
+      ) / documentSearch.documentMatches.length;
+
+      // If documents have high relevance, upgrade the citation level
+      if (avgDocumentRelevance > 0.7 && structuredMatch.level === 'no_direct_match') {
+        combinedLevel = 'general_guidance';
+      } else if (avgDocumentRelevance > 0.8 && structuredMatch.level === 'general_guidance') {
+        combinedLevel = 'related_theme';
+      }
+
+      // Combine confidences (weighted average)
+      combinedConfidence = (structuredMatch.confidence * 0.4) + (avgDocumentRelevance * 0.6);
+    }
+
+    // Add structured data source if we have meaningful matches
+    if (structuredMatch.level !== 'no_direct_match') {
+      sourceTypes.push('structured');
+    }
+
+    // Always include AI knowledge as a source
+    sourceTypes.push('ai_knowledge');
+
+    // Sort quotes by relevance (if available) or confidence
+    finalQuotes.sort((a: any, b: any) => {
+      const aScore = a.relevanceScore || 0.5;
+      const bScore = b.relevanceScore || 0.5;
+      return bScore - aScore;
+    });
+
+    // Limit to top 5 quotes to avoid overwhelming response
+    finalQuotes = finalQuotes.slice(0, 5);
+
+    this.logger.log('Hybrid match completed', {
+      originalLevel: structuredMatch.level,
+      finalLevel: combinedLevel,
+      originalConfidence: structuredMatch.confidence,
+      finalConfidence: combinedConfidence,
+      sourceTypes,
+      totalQuotes: finalQuotes.length,
+      documentMatches: documentSearch.documentMatches.length
+    });
+
+    return {
+      level: combinedLevel,
+      spiritualDisease: finalDisease,
+      relevantQuotes: finalQuotes,
+      confidence: combinedConfidence,
+      documentMatches: documentSearch.documentMatches,
+      sourceTypes,
+      combinedConfidence
+    };
   }
 
   getResponseTemplate(level: CitationMatch['level']): ResponseTemplate | null {

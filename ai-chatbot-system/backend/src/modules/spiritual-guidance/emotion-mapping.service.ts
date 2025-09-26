@@ -81,7 +81,7 @@ export class EmotionMappingService {
       if (score > maxScore) {
         maxScore = score;
         bestMatch = {
-          emotion: config.spiritualEmotion,
+          emotion: emotion as any,
           intensity: Math.min(config.baseIntensity + (score * 0.3), 1.0)
         };
       }

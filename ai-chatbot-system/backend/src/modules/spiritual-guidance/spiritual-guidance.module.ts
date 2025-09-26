@@ -4,6 +4,7 @@ import { SpiritualGuidanceController } from './spiritual-guidance.controller';
 import { CitationService } from './citation.service';
 import { EmotionMappingService } from './emotion-mapping.service';
 import { QualityControlService } from './quality-control.service';
+import { DocumentSearchService } from './document-search.service';
 import { SpiritualGuidanceAdminController } from './admin/spiritual-guidance-admin.controller';
 import { SpiritualGuidanceAdminService } from './admin/spiritual-guidance-admin.service';
 import { DatabaseModule } from '../database/database.module';
@@ -19,6 +20,7 @@ import { EmotionModule } from '../emotion/emotion.module';
     CitationService,
     EmotionMappingService,
     QualityControlService,
+    DocumentSearchService,
     SpiritualGuidanceAdminService
   ],
   exports: [
@@ -26,6 +28,7 @@ import { EmotionModule } from '../emotion/emotion.module';
     CitationService,
     EmotionMappingService,
     QualityControlService,
+    DocumentSearchService,
     SpiritualGuidanceAdminService
   ],
 })

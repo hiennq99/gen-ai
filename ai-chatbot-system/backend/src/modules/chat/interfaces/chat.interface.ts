@@ -5,7 +5,7 @@ export interface ChatRequest {
   sessionId?: string;
   userId?: string;
   metadata?: {
-    channel?: 'web' | 'zalo' | 'api';
+    channel?: 'web' | 'api';
     language?: 'en' | 'vi';
     deviceInfo?: any;
     exactMatch?: boolean;  // Return exact document content without AI

@@ -97,7 +97,7 @@ export class ChatService {
       });
 
       // Check if we have a high-relevance match (>50% relevance) - LOWERED THRESHOLD FOR BETTER MATCHING
-      const hasHighRelevanceMatch = searchResults.length > 0 && searchResults[0].score >= 0.5;
+      // const hasHighRelevanceMatch = searchResults.length > 0 && searchResults[0].score >= 0.5;
 
       // Check if we have a Q&A match (score >= 0.5 for 50%+ similarity)
       const hasExactQAMatch = searchResults.length > 0 &&
@@ -112,7 +112,7 @@ export class ChatService {
       const documentScore = bestDocument?.score || 0;
 
       // FORCE TRAINING-ONLY: Always use training documents, never AI generation
-      const useTrainingOnly = true; // Always use training data
+      // const useTrainingOnly = true; // Always use training data
       const exactMatchMode = bestDocument !== null; // Use document if available
 
       this.logger.log(`🎯 TRAINING-ONLY MODE: Best document found with ${documentScore.toFixed(3)} score`);
@@ -785,7 +785,7 @@ export class ChatService {
       if (guidanceResponse.citations.length > 0) {
         responseContent += '\n\n📚 **References from A Handbook of Spiritual Medicine:**\n';
 
-        guidanceResponse.citations.forEach((citation, index) => {
+        guidanceResponse.citations.forEach((citation, _index) => {
           responseContent += `• Page ${citation.page}: "${citation.quote}"\n`;
         });
 
@@ -859,7 +859,7 @@ export class ChatService {
     }
   }
 
-  private async generateSpiritualMedia(spiritualDisease: string, citationLevel: string): Promise<any[]> {
+  private async generateSpiritualMedia(spiritualDisease: string, _citationLevel: string): Promise<any[]> {
     try {
       const mediaItems = [];
 
@@ -886,8 +886,8 @@ export class ChatService {
 
       for (const mediaItem of diseaseMedia) {
         const generatedMedia = await this.mediaService.generateDummyMedia(
-          'neutral' as any,
-          'spiritual guidance request',
+          mediaItem.mood || 'neutral' as any,
+          mediaItem.description || 'spiritual guidance request',
           true
         );
 

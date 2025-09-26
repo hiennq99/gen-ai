@@ -3,7 +3,20 @@ import { api } from './api';
 export const documentsService = {
   async getDocuments(params?: any) {
     try {
-      const response = await api.get('/documents', { params });
+      // Clean up params to avoid sending React Query internal objects
+      const cleanParams = params && typeof params === 'object' ?
+        Object.fromEntries(
+          Object.entries(params).filter(([_, value]) =>
+            value !== undefined &&
+            value !== null &&
+            typeof value !== 'function' &&
+            typeof value !== 'object'
+          )
+        ) : {};
+
+      const response = await api.get('/documents', {
+        params: Object.keys(cleanParams).length > 0 ? cleanParams : undefined
+      });
       return response.data;
     } catch (error) {
       console.error('Failed to fetch documents:', error);

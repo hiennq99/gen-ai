@@ -3,6 +3,8 @@ import { DatabaseService } from '../../database/database.service';
 import { CitationService } from '../citation.service';
 import { SpiritualGuidanceService } from '../spiritual-guidance.service';
 import { QualityControlService } from '../quality-control.service';
+import { DocumentSearchService } from '../document-search.service';
+import * as fs from 'fs';
 import {
   SpiritualDisease,
   HandbookContent,
@@ -20,6 +22,7 @@ export class SpiritualGuidanceAdminService {
     private readonly citationService: CitationService,
     private readonly spiritualGuidanceService: SpiritualGuidanceService,
     private readonly qualityControlService: QualityControlService,
+    private readonly documentSearchService: DocumentSearchService,
   ) {}
 
   // Spiritual Diseases Management
@@ -504,6 +507,142 @@ export class SpiritualGuidanceAdminService {
   private validateHandbookContent(content: any): void {
     if (!content.title || !content.chapter || !content.pageStart || !content.content) {
       throw new Error('Handbook content must have title, chapter, pageStart, and content');
+    }
+  }
+
+  /**
+   * Process uploaded PDF/DOCX files for training
+   */
+  async processTrainingFile(
+    file: Express.Multer.File,
+    category: 'handbook' | 'qa' | 'general'
+  ): Promise<{ success: boolean; message: string; data?: any }> {
+    try {
+      this.logger.log(`Processing training file: ${file.originalname}, category: ${category}`);
+
+      // Save file temporarily
+      const tempFilePath = `/tmp/${Date.now()}-${file.originalname}`;
+      fs.writeFileSync(tempFilePath, file.buffer);
+
+      // Process file with document search service
+      const chunks = await this.documentSearchService.processUploadedFile(tempFilePath, {
+        originalName: file.originalname,
+        category,
+        fileType: this.getFileType(file.mimetype)
+      });
+
+      // Clean up temp file
+      fs.unlinkSync(tempFilePath);
+
+      this.logger.log(`Successfully processed ${file.originalname}: ${chunks.length} chunks created`);
+
+      return {
+        success: true,
+        message: `Successfully processed file: ${chunks.length} text chunks extracted and indexed`,
+        data: {
+          filename: file.originalname,
+          category,
+          chunksCreated: chunks.length,
+          totalSize: file.size
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`Failed to process training file: ${file.originalname}`, error);
+      return {
+        success: false,
+        message: `Failed to process file: ${error.message}`
+      };
+    }
+  }
+
+  /**
+   * Process multiple training files
+   */
+  async processMultipleTrainingFiles(
+    files: Express.Multer.File[],
+    category: 'handbook' | 'qa' | 'general'
+  ): Promise<{
+    results: Array<{ file: string; success: boolean; message: string; data?: any }>
+  }> {
+    const results = [];
+
+    for (const file of files) {
+      const result = await this.processTrainingFile(file, category);
+      results.push({ file: file.originalname, ...result });
+    }
+
+    return { results };
+  }
+
+  /**
+   * Get file type from mimetype
+   */
+  private getFileType(mimetype: string): string {
+    if (mimetype.includes('pdf')) return 'pdf';
+    if (mimetype.includes('word') || mimetype.includes('docx')) return 'docx';
+    if (mimetype.includes('text')) return 'txt';
+    if (mimetype.includes('csv')) return 'csv';
+    if (mimetype.includes('excel') || mimetype.includes('spreadsheet')) return 'xlsx';
+    return 'unknown';
+  }
+
+  /**
+   * Search processed documents
+   */
+  async searchProcessedDocuments(
+    query: string,
+    options?: {
+      limit?: number;
+      categories?: ('handbook' | 'qa' | 'general')[];
+      minSimilarity?: number;
+    }
+  ) {
+    try {
+      return await this.documentSearchService.searchDocuments(query, options);
+    } catch (error) {
+      this.logger.error('Document search failed', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get training document statistics
+   */
+  async getTrainingDocumentStats() {
+    try {
+      // Get document counts by category
+      const handbookSearch = await this.documentSearchService.searchDocuments('*', {
+        limit: 0,
+        categories: ['handbook']
+      });
+
+      const qaSearch = await this.documentSearchService.searchDocuments('*', {
+        limit: 0,
+        categories: ['qa']
+      });
+
+      const generalSearch = await this.documentSearchService.searchDocuments('*', {
+        limit: 0,
+        categories: ['general']
+      });
+
+      return {
+        totalDocuments: handbookSearch.totalMatches + qaSearch.totalMatches + generalSearch.totalMatches,
+        handbookDocuments: handbookSearch.totalMatches,
+        qaDocuments: qaSearch.totalMatches,
+        generalDocuments: generalSearch.totalMatches,
+        lastUpdated: new Date().toISOString()
+      };
+    } catch (error) {
+      this.logger.error('Failed to get document stats', error);
+      return {
+        totalDocuments: 0,
+        handbookDocuments: 0,
+        qaDocuments: 0,
+        generalDocuments: 0,
+        lastUpdated: new Date().toISOString()
+      };
     }
   }
 }

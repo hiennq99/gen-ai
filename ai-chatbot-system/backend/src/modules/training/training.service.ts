@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 @Injectable()
 export class TrainingService {
   private readonly logger = new Logger(TrainingService.name);
-  private trainingJobs: any[] = [];
+  // Training jobs are now persisted in database instead of memory
 
   constructor(
     private readonly databaseService: DatabaseService,
@@ -40,8 +40,8 @@ export class TrainingService {
         parameters: trainingData.parameters || {},
       };
       
-      // Add to jobs list
-      this.trainingJobs.push(newJob);
+      // Save to database for persistence
+      await this.databaseService.saveTrainingJob(newJob);
       
       // Simulate training progress
       this.simulateTrainingProgress(jobId);
@@ -69,21 +69,33 @@ export class TrainingService {
   
   private simulateTrainingProgress(jobId: string) {
     // Simulate training progress over time
-    const interval = setInterval(() => {
-      const job = this.trainingJobs.find(j => j.id === jobId);
-      if (job) {
-        if (job.progress < 100) {
-          job.progress += Math.random() * 15;
-          job.recordsProcessed += Math.floor(Math.random() * 10);
-          
-          if (job.progress >= 100) {
-            job.progress = 100;
-            job.status = 'completed';
-            job.completedAt = new Date().toISOString();
+    const interval = setInterval(async () => {
+      try {
+        const jobs = await this.databaseService.getTrainingJobs();
+        const job = jobs.find((j: any) => j.id === jobId);
+
+        if (job && job.status === 'running') {
+          const currentProgress = job.progress || 0;
+          const newProgress = Math.min(100, currentProgress + Math.random() * 15);
+          const newRecordsProcessed = (job.recordsProcessed || 0) + Math.floor(Math.random() * 10);
+
+          const updates: any = {
+            progress: newProgress,
+            recordsProcessed: newRecordsProcessed,
+            status: newProgress >= 100 ? 'completed' : 'running'
+          };
+
+          if (newProgress >= 100) {
+            updates.completedAt = new Date().toISOString();
             clearInterval(interval);
           }
+
+          await this.databaseService.updateTrainingJob(jobId, updates);
+        } else {
+          clearInterval(interval);
         }
-      } else {
+      } catch (error) {
+        this.logger.error('Error updating training progress:', error);
         clearInterval(interval);
       }
     }, 5000); // Update every 5 seconds
@@ -139,10 +151,8 @@ export class TrainingService {
 
   async getTrainingJobs() {
     try {
-      // Return all training jobs, sorted by most recent first
-      return this.trainingJobs.sort((a, b) => 
-        new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
-      );
+      // Get training jobs from database
+      return await this.databaseService.getTrainingJobs();
     } catch (error) {
       this.logger.error('Error fetching training jobs:', error);
       return [];
@@ -168,10 +178,16 @@ export class TrainingService {
 
   async stopTraining(jobId: string) {
     try {
-      const job = this.trainingJobs.find(j => j.id === jobId);
+      const jobs = await this.databaseService.getTrainingJobs();
+      const job = jobs.find((j: any) => j.id === jobId);
+
       if (job) {
-        job.status = 'stopped';
-        job.stoppedAt = new Date().toISOString();
+        await this.databaseService.updateTrainingJob(jobId, {
+          status: 'stopped',
+          stoppedAt: new Date().toISOString(),
+          progress: job.progress || 0,
+          recordsProcessed: job.recordsProcessed || 0,
+        });
         return {
           jobId,
           status: 'stopped',
@@ -282,7 +298,8 @@ export class TrainingService {
         csvData: qaResults,
       };
 
-      this.trainingJobs.push(newJob);
+      // Save training job to database for persistence
+      await this.databaseService.saveTrainingJob(newJob);
 
       // Queue training job for processing (if needed)
       await this.queueService.sendMessage('training', {

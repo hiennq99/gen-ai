@@ -230,9 +230,146 @@ export const spiritualGuidanceService = {
     return response.data;
   },
 
+  // Enhanced File Upload Methods for Hybrid Approach
+  async uploadTrainingFile(file: File, type: 'handbook' | 'qa' | 'general'): Promise<{ success: boolean; message: string; data?: any }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      // Use the new hybrid training upload endpoint
+      const response = await api.post(`/admin/spiritual-guidance/training/upload?category=${type}`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      return response.data;
+    } catch (error: any) {
+      console.warn('New hybrid endpoint not available, falling back to legacy endpoints:', error.message);
+
+      // Fallback to old endpoints if new ones are not available
+      formData.append('type', type);
+      let endpoint = '';
+      switch (type) {
+        case 'handbook':
+          endpoint = '/admin/spiritual-guidance/import/handbook';
+          break;
+        case 'qa':
+          endpoint = '/documents/import-qa';
+          break;
+        case 'general':
+          endpoint = '/documents/upload';
+          break;
+      }
+
+      const fallbackResponse = await api.post(endpoint, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      return fallbackResponse.data;
+    }
+  },
+
+  async uploadMultipleFiles(files: File[], type: 'handbook' | 'qa' | 'general'): Promise<{
+    results: Array<{ file: string; success: boolean; message: string; data?: any }>
+  }> {
+    const results = [];
+
+    for (const file of files) {
+      try {
+        const result = await this.uploadTrainingFile(file, type);
+        results.push({ file: file.name, ...result });
+      } catch (error: any) {
+        results.push({
+          file: file.name,
+          success: false,
+          message: error.message || 'Upload failed'
+        });
+      }
+    }
+
+    return { results };
+  },
+
   // System Health
   async getHealthStatus(): Promise<any> {
     const response = await api.get('/spiritual-guidance/health');
     return response.data;
+  },
+
+  // New Hybrid Approach Methods
+  async searchTrainingDocuments(
+    query: string,
+    options?: {
+      limit?: number;
+      categories?: string[];
+      minSimilarity?: number;
+    }
+  ): Promise<any> {
+    const params: any = { query };
+    if (options?.limit) params.limit = options.limit;
+    if (options?.categories) params.categories = options.categories.join(',');
+    if (options?.minSimilarity) params.minSimilarity = options.minSimilarity;
+
+    const response = await api.get('/admin/spiritual-guidance/training/search', { params });
+    return response.data;
+  },
+
+  async getTrainingDocumentStats(): Promise<any> {
+    const response = await api.get('/admin/spiritual-guidance/training/stats');
+    return response.data;
+  },
+
+  async testHybridGuidance(request: {
+    message: string;
+    conversationHistory?: string[];
+  }): Promise<{
+    response: string;
+    citations: any[];
+    citationLevel: string;
+    sourceTypes: string[];
+    documentSources?: string[];
+    hybridConfidence: number;
+    processingDetails?: {
+      documentSearchTime: number;
+      totalDocumentMatches: number;
+      aiEnhancementApplied: boolean;
+    };
+  }> {
+    const response = await api.post('/spiritual-guidance/guidance', request);
+    return response.data;
   }
 };
+
+// Enhanced interfaces for hybrid approach
+export interface HybridSpiritualGuidanceResponse {
+  response: string;
+  citations: any[];
+  citationLevel: 'perfect_match' | 'related_theme' | 'general_guidance' | 'no_direct_match';
+  templateUsed: string;
+  sourceTypes: ('structured' | 'documents' | 'ai_knowledge')[];
+  documentSources?: string[];
+  hybridConfidence: number;
+  processingDetails?: {
+    documentSearchTime: number;
+    totalDocumentMatches: number;
+    aiEnhancementApplied: boolean;
+  };
+  metadata?: any;
+}
+
+export interface DocumentSearchResult {
+  documentMatches: Array<{
+    chunk: {
+      id: string;
+      content: string;
+      source: string;
+      page?: number;
+    };
+    similarity: number;
+    relevanceScore: number;
+  }>;
+  totalMatches: number;
+  searchQuery: string;
+  processingTime: number;
+}

@@ -1,15 +1,28 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { BedrockService } from '../bedrock/bedrock.service';
-import { CitationService } from './citation.service';
+import { CitationService, HybridCitationMatch } from './citation.service';
 import { EmotionMappingService } from './emotion-mapping.service';
 import { QualityControlService } from './quality-control.service';
 import { CacheService } from '../cache/cache.service';
+import { DocumentSearchService } from './document-search.service';
 import {
   SpiritualGuidanceRequest,
   SpiritualGuidanceResponse,
   CitationMatch,
   DirectQuote,
 } from './interfaces/spiritual-guidance.interface';
+
+// Enhanced response interface for hybrid approach
+export interface HybridSpiritualGuidanceResponse extends SpiritualGuidanceResponse {
+  sourceTypes: ('structured' | 'documents' | 'ai_knowledge')[];
+  documentSources?: string[];
+  hybridConfidence: number;
+  processingDetails?: {
+    documentSearchTime: number;
+    totalDocumentMatches: number;
+    aiEnhancementApplied: boolean;
+  };
+}
 
 @Injectable()
 export class SpiritualGuidanceService {
@@ -21,9 +34,10 @@ export class SpiritualGuidanceService {
     private readonly emotionMappingService: EmotionMappingService,
     private readonly qualityControlService: QualityControlService,
     private readonly cacheService: CacheService,
+    private readonly documentSearchService: DocumentSearchService,
   ) {}
 
-  async provideSpiritualGuidance(request: SpiritualGuidanceRequest): Promise<SpiritualGuidanceResponse> {
+  async provideSpiritualGuidance(request: SpiritualGuidanceRequest): Promise<HybridSpiritualGuidanceResponse> {
     try {
       this.logger.log('Providing spiritual guidance for message', {
         messageLength: request.message.length
@@ -33,14 +47,14 @@ export class SpiritualGuidanceService {
       const emotionalState = request.emotionalState ||
         await this.emotionMappingService.analyzeEmotionalState(request.message);
 
-      // Step 2: Find citation match
+      // Step 2: Find hybrid citation match (structured + documents + AI)
       const citationMatch = await this.citationService.findCitationMatch(
         emotionalState,
         request.message
-      );
+      ) as HybridCitationMatch;
 
-      // Step 3: Generate response using appropriate template
-      const response = await this.generateResponse(
+      // Step 3: Generate hybrid response combining all sources
+      const response = await this.generateHybridResponse(
         request,
         emotionalState,
         citationMatch
@@ -49,10 +63,13 @@ export class SpiritualGuidanceService {
       // Step 4: Apply quality control
       const validatedResponse = await this.validateResponse(response, request, emotionalState);
 
-      this.logger.log('Spiritual guidance provided successfully', {
+      this.logger.log('Hybrid spiritual guidance provided successfully', {
         citationLevel: citationMatch.level,
         confidence: citationMatch.confidence,
+        combinedConfidence: citationMatch.combinedConfidence,
         citationCount: citationMatch.relevantQuotes.length,
+        sourceTypes: citationMatch.sourceTypes,
+        documentMatches: citationMatch.documentMatches?.length || 0,
         qualityScore: validatedResponse.metadata?.qualityScore || 'N/A'
       });
 
@@ -62,6 +79,39 @@ export class SpiritualGuidanceService {
       this.logger.error('Failed to provide spiritual guidance', error);
       return this.getFallbackResponse(request.message);
     }
+  }
+
+  private async generateHybridResponse(
+    request: SpiritualGuidanceRequest,
+    emotionalState: any,
+    citationMatch: HybridCitationMatch
+  ): Promise<HybridSpiritualGuidanceResponse> {
+    const startTime = Date.now();
+
+    // Generate response using enhanced hybrid approach
+    const baseResponse = await this.generateResponse(request, emotionalState, citationMatch);
+
+    // Enhance response with document sources and AI knowledge
+    const enhancedResponse = await this.enhanceResponseWithHybridSources(
+      baseResponse,
+      request,
+      emotionalState,
+      citationMatch
+    );
+
+    const processingTime = Date.now() - startTime;
+
+    return {
+      ...enhancedResponse,
+      sourceTypes: citationMatch.sourceTypes,
+      documentSources: citationMatch.documentMatches?.map(match => match.chunk.source) || [],
+      hybridConfidence: citationMatch.combinedConfidence,
+      processingDetails: {
+        documentSearchTime: processingTime,
+        totalDocumentMatches: citationMatch.documentMatches?.length || 0,
+        aiEnhancementApplied: true
+      }
+    };
   }
 
   private async generateResponse(
@@ -240,6 +290,115 @@ Keep it to 1-2 sentences.
       .replace('{supportQuote}', supportQuote.quote);
   }
 
+  /**
+   * Enhance response by integrating document sources with AI knowledge
+   */
+  private async enhanceResponseWithHybridSources(
+    baseResponse: SpiritualGuidanceResponse,
+    request: SpiritualGuidanceRequest,
+    emotionalState: any,
+    citationMatch: HybridCitationMatch
+  ): Promise<SpiritualGuidanceResponse> {
+    try {
+      // If we have document matches, integrate them with AI wisdom
+      if (citationMatch.documentMatches && citationMatch.documentMatches.length > 0) {
+        const documentInsights = citationMatch.documentMatches
+          .slice(0, 3) // Use top 3 document matches
+          .map(match => `"${match.chunk.content.slice(0, 150)}..." (from ${match.chunk.source})`)
+          .join('\n\n');
+
+        // Use AI to synthesize structured guidance + document insights + built-in knowledge
+        const synthesisPrompt = `
+You are providing spiritual guidance by combining multiple sources. Here's what you have:
+
+1. STRUCTURED GUIDANCE: ${baseResponse.response}
+
+2. RELEVANT DOCUMENT EXCERPTS:
+${documentInsights}
+
+3. USER MESSAGE: "${request.message}"
+
+Now synthesize a comprehensive response that:
+- Builds upon the structured guidance
+- Incorporates relevant insights from the documents
+- Adds your own spiritual wisdom where appropriate
+- Maintains a warm, empathetic tone
+- Provides practical, actionable guidance
+- Keeps the response focused and not overly long (300-400 words max)
+
+Integrate these sources naturally - don't just list them separately. Create a flowing, cohesive response that feels unified.`;
+
+        const synthesizedResponse = await this.bedrockService.invokeModel({
+          messages: [{ role: 'user', content: synthesisPrompt }],
+          maxTokens: 500,
+          temperature: 0.7
+        });
+
+        if (synthesizedResponse.content && synthesizedResponse.content.trim().length > 100) {
+          return {
+            ...baseResponse,
+            response: synthesizedResponse.content.trim(),
+          };
+        }
+      }
+
+      // If no documents or synthesis failed, enhance with AI knowledge only
+      return await this.enhanceWithAIKnowledge(baseResponse, request, emotionalState);
+
+    } catch (error) {
+      this.logger.warn('Hybrid enhancement failed, using base response', error);
+      return baseResponse;
+    }
+  }
+
+  /**
+   * Enhance response with AI's built-in spiritual knowledge
+   */
+  private async enhanceWithAIKnowledge(
+    baseResponse: SpiritualGuidanceResponse,
+    request: SpiritualGuidanceRequest,
+    emotionalState: any
+  ): Promise<SpiritualGuidanceResponse> {
+    try {
+      // Only enhance if the base response seems limited
+      if (baseResponse.response.length < 200 || baseResponse.citationLevel === 'no_direct_match') {
+        const enhancementPrompt = `
+A person is seeking spiritual guidance for this situation: "${request.message}"
+
+They're experiencing: ${emotionalState.primaryEmotion}
+
+The current guidance available is: "${baseResponse.response}"
+
+Please provide additional spiritual wisdom and practical advice that complements this guidance. Focus on:
+- Universal spiritual principles that apply to their situation
+- Practical steps they can take
+- Sources of comfort and strength
+- Ways to grow from this experience
+
+Keep your addition to 100-150 words, warm and supportive in tone.`;
+
+        const aiWisdom = await this.bedrockService.invokeModel({
+          messages: [{ role: 'user', content: enhancementPrompt }],
+          maxTokens: 200,
+          temperature: 0.8
+        });
+
+        if (aiWisdom.content && aiWisdom.content.trim().length > 50) {
+          const enhancedResponse = baseResponse.response + '\n\n' + aiWisdom.content.trim();
+          return {
+            ...baseResponse,
+            response: enhancedResponse
+          };
+        }
+      }
+
+      return baseResponse;
+    } catch (error) {
+      this.logger.warn('AI knowledge enhancement failed', error);
+      return baseResponse;
+    }
+  }
+
   private async generateConversationalResponse(
     request: SpiritualGuidanceRequest,
     emotionalState: any,
@@ -276,10 +435,10 @@ Keep it to 2-3 sentences, warm and supportive.
   }
 
   private async validateResponse(
-    response: SpiritualGuidanceResponse,
+    response: HybridSpiritualGuidanceResponse,
     request: SpiritualGuidanceRequest,
     emotionalState: any
-  ): Promise<SpiritualGuidanceResponse> {
+  ): Promise<HybridSpiritualGuidanceResponse> {
     try {
       // Use the comprehensive quality control service
       const qualityResult = await this.qualityControlService.validateResponse(
@@ -307,7 +466,11 @@ Keep it to 2-3 sentences, warm and supportive.
         });
 
         // Apply corrections
-        response = await this.applyQualityCorrections(response, qualityResult);
+        const correctedBase = await this.applyQualityCorrections(response, qualityResult);
+        response = {
+          ...response,
+          ...correctedBase
+        };
       }
 
       return response;
@@ -315,7 +478,11 @@ Keep it to 2-3 sentences, warm and supportive.
       this.logger.error('Quality validation failed', error);
 
       // Fallback to basic validation
-      return this.applyBasicValidation(response);
+      const basicValidated = this.applyBasicValidation(response);
+      return {
+        ...response,
+        ...basicValidated
+      };
     }
   }
 
@@ -323,7 +490,7 @@ Keep it to 2-3 sentences, warm and supportive.
     response: SpiritualGuidanceResponse,
     qualityResult: any
   ): Promise<SpiritualGuidanceResponse> {
-    let correctedResponse = { ...response };
+    const correctedResponse = { ...response };
 
     // Apply specific corrections based on failed checks
     if (!qualityResult.checklist.hasEmotionalAcknowledgment) {
@@ -379,12 +546,20 @@ Keep it to 2-3 sentences, warm and supportive.
     return response;
   }
 
-  private getFallbackResponse(message: string): SpiritualGuidanceResponse {
+  private getFallbackResponse(_message: string): HybridSpiritualGuidanceResponse {
     return {
       response: "I'm here to listen and provide support. While I don't have specific guidance for your exact situation in my training materials, I want you to know that your feelings are valid and that seeking spiritual guidance is a positive step. Would you like me to share some general principles from spiritual teachings that might offer comfort?",
       citations: [],
       citationLevel: 'no_direct_match',
       templateUsed: 'fallback',
+      sourceTypes: ['ai_knowledge'],
+      documentSources: [],
+      hybridConfidence: 0.1,
+      processingDetails: {
+        documentSearchTime: 0,
+        totalDocumentMatches: 0,
+        aiEnhancementApplied: false
+      }
     };
   }
 

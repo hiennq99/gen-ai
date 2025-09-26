@@ -31,7 +31,7 @@ export class ChatRequestDto {
   @IsOptional()
   @IsObject()
   metadata?: {
-    channel?: 'web' | 'zalo' | 'api';
+    channel?: 'web' | 'api';
     language?: 'en' | 'vi';
     deviceInfo?: any;
     exactMatch?: boolean;

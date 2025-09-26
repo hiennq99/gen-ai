@@ -57,13 +57,6 @@ export default () => ({
     ttl: parseInt(process.env.REDIS_TTL || '3600', 10),
   },
   
-  zalo: {
-    webhookSecret: process.env.ZALO_WEBHOOK_SECRET,
-    oaId: process.env.ZALO_OA_ID,
-    appId: process.env.ZALO_APP_ID,
-    appSecret: process.env.ZALO_APP_SECRET,
-    accessToken: process.env.ZALO_ACCESS_TOKEN,
-  },
   
   jwt: {
     secret: process.env.JWT_SECRET || 'your-secret-key',

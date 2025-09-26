@@ -4,9 +4,7 @@ import {
   Body,
   Get,
   Param,
-  UseGuards,
   Logger,
-  Query,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SpiritualGuidanceService } from './spiritual-guidance.service';

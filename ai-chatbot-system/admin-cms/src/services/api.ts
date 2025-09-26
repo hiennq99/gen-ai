@@ -14,6 +14,31 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // Clean up any malformed params that might come from React Query
+  if (config.params && typeof config.params === 'object') {
+    const cleanParams: Record<string, any> = {};
+
+    for (const [key, value] of Object.entries(config.params)) {
+      // Skip React Query internal properties and invalid values
+      if (
+        key !== 'client' &&
+        key !== 'signal' &&
+        !key.startsWith('queryKey') &&
+        value !== undefined &&
+        value !== null &&
+        typeof value !== 'function' &&
+        typeof value !== 'object' &&
+        value.toString() !== '[object Object]' &&
+        value.toString() !== '[object AbortSignal]'
+      ) {
+        cleanParams[key] = value;
+      }
+    }
+
+    config.params = Object.keys(cleanParams).length > 0 ? cleanParams : undefined;
+  }
+
   return config;
 });
 

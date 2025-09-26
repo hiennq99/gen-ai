@@ -8,7 +8,6 @@ import {
   Progress,
   Form,
   Input,
-  Select,
   message,
   Tabs,
   Alert,
@@ -36,7 +35,12 @@ import {
   EditOutlined,
   PlusOutlined,
   BarChartOutlined,
-  EyeOutlined
+  EyeOutlined,
+  ExclamationCircleOutlined,
+  SearchOutlined,
+  ClockCircleOutlined,
+  ReloadOutlined,
+  ExportOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { spiritualGuidanceService } from '@/services/spiritualGuidance';
@@ -53,6 +57,13 @@ export default function SpiritualGuidance() {
   const [diseaseModalVisible, setDiseaseModalVisible] = useState(false);
   const [testDrawerVisible, setTestDrawerVisible] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
+  const [uploadResults, setUploadResults] = useState<{
+    handbook?: any[];
+    qa?: any[];
+    general?: any[];
+  }>({});
+  const [searchResults, setSearchResults] = useState<any>(null);
+  const [documentStats, setDocumentStats] = useState<any>(null);
 
   const queryClient = useQueryClient();
 
@@ -170,6 +181,147 @@ export default function SpiritualGuidance() {
         ? values.conversationHistory.split('\n').filter((line: string) => line.trim())
         : [],
     });
+  };
+
+  // Upload Handlers
+  const handleFileUpload = async (info: any, type: 'handbook' | 'qa' | 'general') => {
+    const files = Array.from(info.fileList).map((file: any) => file.originFileObj);
+    if (files.length === 0) return;
+
+    try {
+      const result = await spiritualGuidanceService.uploadMultipleFiles(files, type);
+
+      setUploadResults(prev => ({
+        ...prev,
+        [type]: [...(prev[type] || []), ...result.results]
+      }));
+
+      const successCount = result.results.filter(r => r.success).length;
+      const totalCount = result.results.length;
+
+      if (successCount === totalCount) {
+        message.success(`Successfully uploaded ${successCount} ${type} files`);
+      } else if (successCount > 0) {
+        message.warning(`Uploaded ${successCount}/${totalCount} ${type} files successfully`);
+      } else {
+        message.error(`Failed to upload ${type} files`);
+      }
+
+      // Refresh data
+      queryClient.invalidateQueries({ queryKey: ['spiritual-diseases'] });
+      queryClient.invalidateQueries({ queryKey: ['handbook-content'] });
+      queryClient.invalidateQueries({ queryKey: ['training-data'] });
+
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      message.error(`Upload failed: ${error.message}`);
+    }
+  };
+
+  const clearUploadResults = () => {
+    setUploadResults({});
+    message.success('Upload results cleared');
+  };
+
+  const handleExportData = async () => {
+    try {
+      const blob = await spiritualGuidanceService.exportTrainingData('xlsx');
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `spiritual-guidance-training-data-${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      message.success('Training data exported successfully');
+    } catch (error: any) {
+      console.error('Export error:', error);
+      message.error(`Export failed: ${error.message}`);
+    }
+  };
+
+  // New handlers for hybrid approach
+  const handleDocumentSearch = async (query: string, options: any) => {
+    if (!query.trim()) {
+      message.warning('Please enter a search query');
+      return;
+    }
+
+    try {
+      const searchOptions: any = {};
+      if (options.categories) searchOptions.categories = options.categories;
+      if (options.limit) searchOptions.limit = options.limit;
+      if (options.minSimilarity) searchOptions.minSimilarity = options.minSimilarity;
+
+      const result = await spiritualGuidanceService.searchTrainingDocuments(query, searchOptions);
+      setSearchResults(result.data);
+      message.success(`Found ${result.data.totalMatches} matches`);
+    } catch (error: any) {
+      console.error('Document search error:', error);
+      message.error(`Search failed: ${error.message}`);
+      setSearchResults(null);
+    }
+  };
+
+  const loadDocumentStats = async () => {
+    try {
+      const result = await spiritualGuidanceService.getTrainingDocumentStats();
+      setDocumentStats(result.data);
+    } catch (error: any) {
+      console.error('Failed to load document stats:', error);
+      message.error('Failed to load document statistics');
+    }
+  };
+
+  const handleExportSearchResults = () => {
+    if (!searchResults || !searchResults.documentMatches.length) {
+      message.warning('No search results to export');
+      return;
+    }
+
+    try {
+      const exportData = searchResults.documentMatches.map((match: any) => ({
+        source: match.chunk.source,
+        content: match.chunk.content,
+        page: match.chunk.page || 'N/A',
+        relevanceScore: Math.round(match.relevanceScore * 100) + '%',
+        similarity: Math.round(match.similarity * 100) + '%'
+      }));
+
+      const dataStr = JSON.stringify(exportData, null, 2);
+      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+
+      const exportFileDefaultName = `document-search-results-${new Date().toISOString().split('T')[0]}.json`;
+
+      const linkElement = document.createElement('a');
+      linkElement.setAttribute('href', dataUri);
+      linkElement.setAttribute('download', exportFileDefaultName);
+      linkElement.click();
+
+      message.success('Search results exported successfully');
+    } catch (error: any) {
+      console.error('Export error:', error);
+      message.error(`Export failed: ${error.message}`);
+    }
+  };
+
+  // Load document stats on component mount
+  React.useEffect(() => {
+    loadDocumentStats();
+  }, []);
+
+  const calculateSuccessRate = () => {
+    const allResults = [
+      ...(uploadResults.handbook || []),
+      ...(uploadResults.qa || []),
+      ...(uploadResults.general || [])
+    ];
+
+    if (allResults.length === 0) return 0;
+
+    const successCount = allResults.filter(r => r.success).length;
+    return Math.round((successCount / allResults.length) * 100);
   };
 
   // Spiritual Diseases Columns
@@ -652,18 +804,96 @@ export default function SpiritualGuidance() {
                       </div>
                     )}
 
-                    {testResult.metadata?.qualityScore && (
-                      <div>
-                        <Text strong>Quality Score: </Text>
-                        <Progress
-                          percent={Math.round(testResult.metadata.qualityScore * 100)}
-                          size="small"
-                          status={testResult.metadata.qualityScore > 0.8 ? 'success' :
-                                 testResult.metadata.qualityScore > 0.6 ? 'normal' : 'exception'}
-                          style={{ width: 200, display: 'inline-block', marginLeft: 8 }}
-                        />
+                    {/* Enhanced Test Results for Hybrid Approach */}
+                    {testResult.sourceTypes && (
+                      <div style={{ marginBottom: 12 }}>
+                        <Text strong>Information Sources:</Text>
+                        <div style={{ marginTop: 8 }}>
+                          {testResult.sourceTypes.map((source: string) => (
+                            <Tag key={source} color={
+                              source === 'structured' ? 'blue' :
+                              source === 'documents' ? 'green' : 'purple'
+                            }>
+                              {source === 'structured' ? 'Database' :
+                               source === 'documents' ? 'Training Docs' : 'AI Knowledge'}
+                            </Tag>
+                          ))}
+                        </div>
                       </div>
                     )}
+
+                    {testResult.documentSources && testResult.documentSources.length > 0 && (
+                      <div style={{ marginBottom: 12 }}>
+                        <Text strong>Document Sources:</Text>
+                        <div style={{ marginTop: 8 }}>
+                          {testResult.documentSources.map((doc: string, index: number) => (
+                            <Tag key={index} color="green" style={{ marginBottom: 4 }}>
+                              {doc}
+                            </Tag>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {testResult.processingDetails && (
+                      <div style={{ marginBottom: 12 }}>
+                        <Text strong>Processing Details:</Text>
+                        <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
+                          <Row gutter={16}>
+                            <Col span={8}>
+                              <Statistic
+                                title="Document Matches"
+                                value={testResult.processingDetails.totalDocumentMatches}
+                                size="small"
+                              />
+                            </Col>
+                            <Col span={8}>
+                              <Statistic
+                                title="Search Time"
+                                value={testResult.processingDetails.documentSearchTime}
+                                suffix="ms"
+                                size="small"
+                              />
+                            </Col>
+                            <Col span={8}>
+                              <Statistic
+                                title="AI Enhanced"
+                                value={testResult.processingDetails.aiEnhancementApplied ? 'Yes' : 'No'}
+                                size="small"
+                              />
+                            </Col>
+                          </Row>
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
+                      {testResult.metadata?.qualityScore && (
+                        <div>
+                          <Text strong>Quality Score: </Text>
+                          <Progress
+                            percent={Math.round(testResult.metadata.qualityScore * 100)}
+                            size="small"
+                            status={testResult.metadata.qualityScore > 0.8 ? 'success' :
+                                   testResult.metadata.qualityScore > 0.6 ? 'normal' : 'exception'}
+                            style={{ width: 150, display: 'inline-block', marginLeft: 8 }}
+                          />
+                        </div>
+                      )}
+
+                      {testResult.hybridConfidence && (
+                        <div>
+                          <Text strong>Hybrid Confidence: </Text>
+                          <Progress
+                            percent={Math.round(testResult.hybridConfidence * 100)}
+                            size="small"
+                            status={testResult.hybridConfidence > 0.8 ? 'success' :
+                                   testResult.hybridConfidence > 0.6 ? 'normal' : 'exception'}
+                            style={{ width: 150, display: 'inline-block', marginLeft: 8 }}
+                          />
+                        </div>
+                      )}
+                    </div>
                   </Card>
                 )}
               </Card>
@@ -721,6 +951,420 @@ export default function SpiritualGuidance() {
                     </List.Item>
                   )}
                 />
+              </Card>
+            </Col>
+          </Row>
+        </TabPane>
+
+        {/* Document Search Tab - NEW */}
+        <TabPane tab={<span><SearchOutlined />Document Search</span>} key="search">
+          <Row gutter={16}>
+            <Col span={12}>
+              <Card title="Search Training Documents">
+                <Form
+                  layout="vertical"
+                  onFinish={(values) => handleDocumentSearch(values.query, values)}
+                >
+                  <Form.Item
+                    label="Search Query"
+                    name="query"
+                    rules={[{ required: true, message: 'Please enter a search query' }]}
+                  >
+                    <Input.Search
+                      placeholder="Search through your uploaded documents..."
+                      onSearch={(value) => handleDocumentSearch(value, {})}
+                      enterButton="Search"
+                    />
+                  </Form.Item>
+
+                  <Row gutter={16}>
+                    <Col span={8}>
+                      <Form.Item label="Categories" name="categories">
+                        <Select mode="multiple" placeholder="Select categories">
+                          <Select.Option value="handbook">Handbook</Select.Option>
+                          <Select.Option value="qa">Q&A</Select.Option>
+                          <Select.Option value="general">General</Select.Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item label="Max Results" name="limit">
+                        <Select defaultValue={10}>
+                          <Select.Option value={5}>5</Select.Option>
+                          <Select.Option value={10}>10</Select.Option>
+                          <Select.Option value={20}>20</Select.Option>
+                          <Select.Option value={50}>50</Select.Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item label="Min Similarity" name="minSimilarity">
+                        <Select defaultValue={0.3}>
+                          <Select.Option value={0.1}>0.1 (Low)</Select.Option>
+                          <Select.Option value={0.3}>0.3 (Medium)</Select.Option>
+                          <Select.Option value={0.5}>0.5 (High)</Select.Option>
+                          <Select.Option value={0.7}>0.7 (Very High)</Select.Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </Form>
+
+                {searchResults && (
+                  <div style={{ marginTop: 16 }}>
+                    <Text strong>Search Results ({searchResults.totalMatches} matches in {searchResults.processingTime}ms)</Text>
+                    <List
+                      style={{ marginTop: 8 }}
+                      dataSource={searchResults.documentMatches}
+                      renderItem={(match: any) => (
+                        <List.Item>
+                          <List.Item.Meta
+                            title={
+                              <div>
+                                <Text strong>{match.chunk.source}</Text>
+                                {match.chunk.page && (
+                                  <Tag color="blue" style={{ marginLeft: 8 }}>
+                                    Page {match.chunk.page}
+                                  </Tag>
+                                )}
+                                <Tag color="green">
+                                  {Math.round(match.relevanceScore * 100)}% relevance
+                                </Tag>
+                              </div>
+                            }
+                            description={match.chunk.content.slice(0, 300) + '...'}
+                          />
+                        </List.Item>
+                      )}
+                    />
+                  </div>
+                )}
+              </Card>
+            </Col>
+
+            <Col span={12}>
+              <Card title="Document Statistics">
+                {documentStats && (
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Statistic
+                        title="Total Documents"
+                        value={documentStats.totalDocuments}
+                        prefix={<FileTextOutlined />}
+                      />
+                    </Col>
+                    <Col span={12}>
+                      <Statistic
+                        title="Last Updated"
+                        value={new Date(documentStats.lastUpdated).toLocaleDateString()}
+                        prefix={<ClockCircleOutlined />}
+                      />
+                    </Col>
+                  </Row>
+                )}
+
+                <Divider />
+
+                {documentStats && (
+                  <Row gutter={16}>
+                    <Col span={8}>
+                      <Statistic
+                        title="Handbook"
+                        value={documentStats.handbookDocuments}
+                        valueStyle={{ color: '#3f8600' }}
+                      />
+                    </Col>
+                    <Col span={8}>
+                      <Statistic
+                        title="Q&A"
+                        value={documentStats.qaDocuments}
+                        valueStyle={{ color: '#722ed1' }}
+                      />
+                    </Col>
+                    <Col span={8}>
+                      <Statistic
+                        title="General"
+                        value={documentStats.generalDocuments}
+                        valueStyle={{ color: '#1890ff' }}
+                      />
+                    </Col>
+                  </Row>
+                )}
+
+                <Divider />
+
+                <Button
+                  type="primary"
+                  icon={<ReloadOutlined />}
+                  onClick={() => loadDocumentStats()}
+                  style={{ marginRight: 8 }}
+                >
+                  Refresh Stats
+                </Button>
+
+                <Button
+                  icon={<ExportOutlined />}
+                  onClick={() => handleExportSearchResults()}
+                >
+                  Export Results
+                </Button>
+              </Card>
+            </Col>
+          </Row>
+        </TabPane>
+
+        {/* Training Upload Tab */}
+        <TabPane tab={<span><UploadOutlined />Training Upload</span>} key="upload">
+          <Row gutter={16}>
+            <Col span={8}>
+              <Card
+                title="📚 Handbook Content Upload"
+                extra={<Badge count={uploadResults.handbook?.length || 0} />}
+              >
+                <Alert
+                  message="Upload handbook content files (PDF, DOCX, TXT) to train the spiritual guidance model"
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                />
+
+                <Upload.Dragger
+                  multiple
+                  accept=".pdf,.docx,.doc,.txt"
+                  beforeUpload={() => false}
+                  onChange={(info) => handleFileUpload(info, 'handbook')}
+                  fileList={[]}
+                >
+                  <p className="ant-upload-drag-icon">
+                    <BookOutlined style={{ fontSize: 48, color: '#1890ff' }} />
+                  </p>
+                  <p className="ant-upload-text">Drop handbook files here or click to upload</p>
+                  <p className="ant-upload-hint">
+                    Supports: PDF, DOCX, TXT files
+                  </p>
+                </Upload.Dragger>
+
+                {uploadResults.handbook && uploadResults.handbook.length > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <Title level={5}>Upload Results:</Title>
+                    <List
+                      size="small"
+                      dataSource={uploadResults.handbook}
+                      renderItem={(item: any) => (
+                        <List.Item>
+                          <List.Item.Meta
+                            avatar={
+                              item.success ?
+                              <CheckCircleOutlined style={{ color: '#52c41a' }} /> :
+                              <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />
+                            }
+                            title={item.file}
+                            description={item.message}
+                          />
+                        </List.Item>
+                      )}
+                    />
+                  </div>
+                )}
+              </Card>
+            </Col>
+
+            <Col span={8}>
+              <Card
+                title="❓ Q&A Training Data"
+                extra={<Badge count={uploadResults.qa?.length || 0} />}
+              >
+                <Alert
+                  message="Upload CSV/Excel files with questions and answers for training"
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                />
+
+                <Upload.Dragger
+                  multiple
+                  accept=".csv,.xlsx,.xls"
+                  beforeUpload={() => false}
+                  onChange={(info) => handleFileUpload(info, 'qa')}
+                  fileList={[]}
+                >
+                  <p className="ant-upload-drag-icon">
+                    <FileTextOutlined style={{ fontSize: 48, color: '#52c41a' }} />
+                  </p>
+                  <p className="ant-upload-text">Drop Q&A files here or click to upload</p>
+                  <p className="ant-upload-hint">
+                    Supports: CSV, Excel files
+                  </p>
+                </Upload.Dragger>
+
+                {uploadResults.qa && uploadResults.qa.length > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <Title level={5}>Upload Results:</Title>
+                    <List
+                      size="small"
+                      dataSource={uploadResults.qa}
+                      renderItem={(item: any) => (
+                        <List.Item>
+                          <List.Item.Meta
+                            avatar={
+                              item.success ?
+                              <CheckCircleOutlined style={{ color: '#52c41a' }} /> :
+                              <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />
+                            }
+                            title={item.file}
+                            description={item.message}
+                          />
+                        </List.Item>
+                      )}
+                    />
+                  </div>
+                )}
+              </Card>
+            </Col>
+
+            <Col span={8}>
+              <Card
+                title="📄 General Documents"
+                extra={<Badge count={uploadResults.general?.length || 0} />}
+              >
+                <Alert
+                  message="Upload general training documents for processing"
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                />
+
+                <Upload.Dragger
+                  multiple
+                  accept=".pdf,.docx,.doc,.txt,.csv,.xlsx,.xls"
+                  beforeUpload={() => false}
+                  onChange={(info) => handleFileUpload(info, 'general')}
+                  fileList={[]}
+                >
+                  <p className="ant-upload-drag-icon">
+                    <UploadOutlined style={{ fontSize: 48, color: '#722ed1' }} />
+                  </p>
+                  <p className="ant-upload-text">Drop files here or click to upload</p>
+                  <p className="ant-upload-hint">
+                    Supports: PDF, DOCX, TXT, CSV, Excel
+                  </p>
+                </Upload.Dragger>
+
+                {uploadResults.general && uploadResults.general.length > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <Title level={5}>Upload Results:</Title>
+                    <List
+                      size="small"
+                      dataSource={uploadResults.general}
+                      renderItem={(item: any) => (
+                        <List.Item>
+                          <List.Item.Meta
+                            avatar={
+                              item.success ?
+                              <CheckCircleOutlined style={{ color: '#52c41a' }} /> :
+                              <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />
+                            }
+                            title={item.file}
+                            description={item.message}
+                          />
+                        </List.Item>
+                      )}
+                    />
+                  </div>
+                )}
+              </Card>
+            </Col>
+          </Row>
+
+          <Divider />
+
+          <Row gutter={16}>
+            <Col span={24}>
+              <Card
+                title="📊 Upload Statistics & Actions"
+                extra={
+                  <Space>
+                    <Button
+                      icon={<DeleteOutlined />}
+                      onClick={clearUploadResults}
+                    >
+                      Clear Results
+                    </Button>
+                    <Button
+                      type="primary"
+                      icon={<DownloadOutlined />}
+                      onClick={handleExportData}
+                    >
+                      Export Training Data
+                    </Button>
+                  </Space>
+                }
+              >
+                <Row gutter={16}>
+                  <Col span={6}>
+                    <Statistic
+                      title="Handbook Files"
+                      value={uploadResults.handbook?.filter((r: any) => r.success).length || 0}
+                      suffix={`/ ${uploadResults.handbook?.length || 0}`}
+                      valueStyle={{ color: '#3f8600' }}
+                    />
+                  </Col>
+                  <Col span={6}>
+                    <Statistic
+                      title="Q&A Files"
+                      value={uploadResults.qa?.filter((r: any) => r.success).length || 0}
+                      suffix={`/ ${uploadResults.qa?.length || 0}`}
+                      valueStyle={{ color: '#3f8600' }}
+                    />
+                  </Col>
+                  <Col span={6}>
+                    <Statistic
+                      title="General Files"
+                      value={uploadResults.general?.filter((r: any) => r.success).length || 0}
+                      suffix={`/ ${uploadResults.general?.length || 0}`}
+                      valueStyle={{ color: '#3f8600' }}
+                    />
+                  </Col>
+                  <Col span={6}>
+                    <Statistic
+                      title="Success Rate"
+                      value={calculateSuccessRate()}
+                      suffix="%"
+                      valueStyle={{ color: calculateSuccessRate() > 80 ? '#3f8600' : '#cf1322' }}
+                    />
+                  </Col>
+                </Row>
+
+                {(uploadResults.handbook?.length || uploadResults.qa?.length || uploadResults.general?.length) ? (
+                  <div style={{ marginTop: 16 }}>
+                    <Title level={5}>Recent Upload Activity</Title>
+                    <div style={{ maxHeight: 200, overflow: 'auto' }}>
+                      {[
+                        ...(uploadResults.handbook || []).map((r: any) => ({ ...r, type: 'Handbook' })),
+                        ...(uploadResults.qa || []).map((r: any) => ({ ...r, type: 'Q&A' })),
+                        ...(uploadResults.general || []).map((r: any) => ({ ...r, type: 'General' }))
+                      ].map((item: any, idx: number) => (
+                        <div key={idx} style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>
+                          <Space>
+                            {item.success ?
+                              <CheckCircleOutlined style={{ color: '#52c41a' }} /> :
+                              <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />
+                            }
+                            <Tag color={item.success ? 'green' : 'red'}>{item.type}</Tag>
+                            <Text strong>{item.file}</Text>
+                            <Text type={item.success ? 'success' : 'danger'}>{item.message}</Text>
+                          </Space>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#999' }}>
+                    <UploadOutlined style={{ fontSize: 48, marginBottom: 16 }} />
+                    <br />
+                    Upload files to see statistics and results here
+                  </div>
+                )}
               </Card>
             </Col>
           </Row>

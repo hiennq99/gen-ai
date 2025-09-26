@@ -39,7 +39,10 @@ export default function Documents() {
 
   const { data: documents, isLoading } = useQuery({
     queryKey: ['documents', searchText],
-    queryFn: () => documentsService.getDocuments({ search: searchText }),
+    queryFn: () => {
+      const params = searchText ? { search: searchText } : {};
+      return documentsService.getDocuments(params);
+    },
   });
 
   const uploadMutation = useMutation({

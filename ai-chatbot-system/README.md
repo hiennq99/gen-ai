@@ -7,7 +7,6 @@ Enterprise-grade AI consulting chatbot powered by Claude on AWS Bedrock with emo
 - 🤖 Claude AI integration via AWS Bedrock
 - 😊 Emotion detection for context-aware responses
 - 📚 Document training (PDF, DOCX, JSON)
-- 💬 Zalo messenger integration
 - 🎯 70-90% accuracy for 500+ Q&A scenarios
 - ⚡ 3-5 second response time
 - 🖼️ Text + media (images, videos) responses
@@ -17,9 +16,9 @@ Enterprise-grade AI consulting chatbot powered by Claude on AWS Bedrock with emo
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│  Zalo App   │────▶│   Webhook    │────▶│   NestJS    │
-└─────────────┘     │   Handler    │     │   Backend   │
+                    ┌──────────────┐     ┌─────────────┐
+                    │   NextJS     │────▶│   NestJS    │
+                    │   Chat UI    │     │   Backend   │
                     └──────────────┘     └─────┬───────┘
                                                 │
                     ┌──────────────┐            ▼
@@ -50,7 +49,6 @@ Enterprise-grade AI consulting chatbot powered by Claude on AWS Bedrock with emo
 - **Storage**: AWS S3
 - **Queue**: AWS SQS
 - **Cache**: Redis
-- **Monitoring**: CloudWatch + OpenTelemetry
 
 ## Quick Start
 
@@ -58,7 +56,6 @@ Enterprise-grade AI consulting chatbot powered by Claude on AWS Bedrock with emo
 - Node.js 18+
 - AWS Account with Bedrock access
 - Docker & Docker Compose
-- Zalo Mini App credentials
 
 ### Installation
 
@@ -72,7 +69,7 @@ npm install
 
 # Setup environment variables
 cp .env.example .env
-# Edit .env with your AWS and Zalo credentials
+# Edit .env with your AWS credentials
 
 # Start development servers
 npm run dev

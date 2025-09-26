@@ -28,6 +28,7 @@ export class DatabaseService implements OnModuleInit {
     this.inMemoryStore.set('users', []);
     this.inMemoryStore.set('sessions', []);
     this.inMemoryStore.set('qa', []);
+    this.inMemoryStore.set('training-jobs', []);
 
     // No hardcoded Q&A data - use vector database approach
 
@@ -71,6 +72,7 @@ export class DatabaseService implements OnModuleInit {
         this.inMemoryStore.set('documents', []);
         this.inMemoryStore.set('training', []);
         this.inMemoryStore.set('users', []);
+        this.inMemoryStore.set('training-jobs', []);
         return;
       }
       
@@ -92,6 +94,7 @@ export class DatabaseService implements OnModuleInit {
       this.inMemoryStore.set('documents', []);
       this.inMemoryStore.set('training', []);
       this.inMemoryStore.set('users', []);
+      this.inMemoryStore.set('training-jobs', []);
     }
   }
 
@@ -592,6 +595,134 @@ export class DatabaseService implements OnModuleInit {
     } catch (error) {
       this.logger.error('Error clearing Q&A data:', error);
       throw error;
+    }
+  }
+
+  // Training job methods
+  async saveTrainingJob(jobData: any) {
+    try {
+      if (!this.isConfigured) {
+        // Fall back to in-memory store
+        const jobs = this.inMemoryStore.get('training-jobs') || [];
+        jobs.push(jobData);
+        this.inMemoryStore.set('training-jobs', jobs);
+        return { success: true };
+      }
+
+      const command = new PutCommand({
+        TableName: this.tables.training,
+        Item: {
+          ...jobData,
+          type: 'training-job',
+          createdAt: Date.now(),
+          createdAtISO: new Date().toISOString(),
+        },
+      });
+
+      const response = await this.docClient.send(command);
+      return { success: true, response };
+    } catch (error: any) {
+      this.logger.error('Error saving training job:', error);
+      // Fall back to in-memory store on error
+      const jobs = this.inMemoryStore.get('training-jobs') || [];
+      jobs.push(jobData);
+      this.inMemoryStore.set('training-jobs', jobs);
+      return { success: true, fallback: true };
+    }
+  }
+
+  async getTrainingJobs() {
+    try {
+      if (!this.isConfigured) {
+        // Use in-memory store
+        const jobs = this.inMemoryStore.get('training-jobs') || [];
+        return jobs.sort((a: any, b: any) =>
+          new Date(b.startedAt || b.createdAtISO).getTime() - new Date(a.startedAt || a.createdAtISO).getTime()
+        );
+      }
+
+      const command = new ScanCommand({
+        TableName: this.tables.training,
+        FilterExpression: '#type = :job_type',
+        ExpressionAttributeNames: {
+          '#type': 'type'
+        },
+        ExpressionAttributeValues: {
+          ':job_type': 'training-job'
+        }
+      });
+
+      const response = await this.docClient.send(command);
+      const jobs = response.Items || [];
+
+      // Sort by most recent first
+      return jobs.sort((a: any, b: any) =>
+        new Date(b.startedAt || b.createdAtISO).getTime() - new Date(a.startedAt || a.createdAtISO).getTime()
+      );
+    } catch (error: any) {
+      if (error.name === 'ResourceNotFoundException') {
+        this.logger.warn('Training table does not exist yet');
+        // Fall back to in-memory store
+        const jobs = this.inMemoryStore.get('training-jobs') || [];
+        return jobs.sort((a: any, b: any) =>
+          new Date(b.startedAt || b.createdAtISO).getTime() - new Date(a.startedAt || a.createdAtISO).getTime()
+        );
+      }
+      this.logger.error('Error fetching training jobs:', error);
+      return [];
+    }
+  }
+
+  async updateTrainingJob(jobId: string, updates: any) {
+    try {
+      if (!this.isConfigured) {
+        // Update in-memory store
+        const jobs = this.inMemoryStore.get('training-jobs') || [];
+        const jobIndex = jobs.findIndex((job: any) => job.id === jobId);
+        if (jobIndex !== -1) {
+          jobs[jobIndex] = { ...jobs[jobIndex], ...updates, updatedAt: new Date().toISOString() };
+          this.inMemoryStore.set('training-jobs', jobs);
+        }
+        return { success: true };
+      }
+
+      const command = new UpdateCommand({
+        TableName: this.tables.training,
+        Key: { id: jobId },
+        UpdateExpression: 'SET #status = :status, #progress = :progress, #updatedAt = :updatedAt' +
+          (updates.completedAt ? ', #completedAt = :completedAt' : '') +
+          (updates.stoppedAt ? ', #stoppedAt = :stoppedAt' : '') +
+          (updates.recordsProcessed ? ', #recordsProcessed = :recordsProcessed' : ''),
+        ExpressionAttributeNames: {
+          '#status': 'status',
+          '#progress': 'progress',
+          '#updatedAt': 'updatedAt',
+          ...(updates.completedAt && { '#completedAt': 'completedAt' }),
+          ...(updates.stoppedAt && { '#stoppedAt': 'stoppedAt' }),
+          ...(updates.recordsProcessed && { '#recordsProcessed': 'recordsProcessed' }),
+        },
+        ExpressionAttributeValues: {
+          ':status': updates.status,
+          ':progress': updates.progress,
+          ':updatedAt': new Date().toISOString(),
+          ...(updates.completedAt && { ':completedAt': updates.completedAt }),
+          ...(updates.stoppedAt && { ':stoppedAt': updates.stoppedAt }),
+          ...(updates.recordsProcessed && { ':recordsProcessed': updates.recordsProcessed }),
+        },
+      });
+
+      await this.docClient.send(command);
+      return { success: true };
+    } catch (error: any) {
+      this.logger.error('Error updating training job:', error);
+      // Fall back to in-memory store on error
+      const jobs = this.inMemoryStore.get('training-jobs') || [];
+      const jobIndex = jobs.findIndex((job: any) => job.id === jobId);
+      if (jobIndex !== -1) {
+        jobs[jobIndex] = { ...jobs[jobIndex], ...updates, updatedAt: new Date().toISOString() };
+        this.inMemoryStore.set('training-jobs', jobs);
+      }
+      return { success: true, fallback: true };
     }
   }
 
