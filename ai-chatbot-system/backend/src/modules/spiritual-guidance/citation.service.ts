@@ -225,7 +225,7 @@ If you'd like, I can share what the Handbook says about {relatedTopic} which mig
     const messageLower = message.toLowerCase();
 
     // Level 1: Perfect Match - Direct emotion to spiritual disease mapping
-    for (const [_key, disease] of this.spiritualDiseases) {
+    for (const disease of this.spiritualDiseases.values()) {
       if (disease.emotionalTriggers.some(trigger =>
         messageLower.includes(trigger) || primaryEmotion.includes(trigger)
       )) {
@@ -239,7 +239,7 @@ If you'd like, I can share what the Handbook says about {relatedTopic} which mig
     }
 
     // Level 2: Related Theme - Semantic similarity
-    for (const [_key, disease] of this.spiritualDiseases) {
+    for (const disease of this.spiritualDiseases.values()) {
       const semanticMatch = this.calculateSemanticSimilarity(
         emotionalState,
         message,

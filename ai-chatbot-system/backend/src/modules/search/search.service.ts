@@ -1188,4 +1188,167 @@ export class SearchService implements OnModuleInit {
     // Ensure result is between 0 and 1 (cosine similarity can be -1 to 1, but we want 0 to 1)
     return Math.max(0, similarity);
   }
+
+  /**
+   * Search PDF content using Redis vector database
+   */
+  async searchPDFContent(
+    query: string,
+    options: {
+      limit?: number;
+      threshold?: number;
+      sourceFile?: string;
+      documentId?: string;
+    } = {}
+  ): Promise<any[]> {
+    const { limit = 10, threshold = 0.7, sourceFile, documentId } = options;
+
+    try {
+
+      // Generate embedding for the search query
+      const queryEmbedding = await this.generateEmbedding(query);
+      this.logger.debug(`Generated query embedding for PDF search: "${query.substring(0, 50)}..."`);
+
+      // Perform vector similarity search
+      const vectorResults = await this.databaseService.searchVectorSimilar(
+        queryEmbedding,
+        limit * 2, // Get more results to allow for filtering
+        threshold
+      );
+
+      // Filter by metadata if specified
+      let filteredResults = vectorResults;
+
+      if (sourceFile) {
+        filteredResults = filteredResults.filter(result =>
+          result.metadata?.sourceFile?.includes(sourceFile)
+        );
+      }
+
+      if (documentId) {
+        filteredResults = filteredResults.filter(result =>
+          result.metadata?.documentId === documentId
+        );
+      }
+
+      // Format results for consumption
+      const searchResults = filteredResults.slice(0, limit).map(result => ({
+        id: result.id,
+        text: result.text,
+        similarity: result.similarity,
+        metadata: {
+          ...result.metadata,
+          type: 'pdf_content',
+          source: 'redis_vector',
+        },
+        highlight: this.extractRelevantSnippet(result.text, query),
+      }));
+
+      this.logger.log(`Redis vector search returned ${searchResults.length} relevant PDF chunks for query: "${query}"`);
+
+      return searchResults;
+    } catch (error) {
+      this.logger.error('Error searching PDF content with vectors:', error);
+
+      // Fallback to metadata search if vector search fails
+      try {
+        const filters: any = { type: 'pdf_content' };
+        if (sourceFile) {
+          filters.sourceFile = sourceFile;
+        }
+
+        const fallbackResults = await this.databaseService.searchVectorsByMetadata(
+          filters,
+          options.limit || 10
+        );
+
+        return fallbackResults.map(result => ({
+          id: result.id,
+          text: result.text,
+          similarity: 0.5, // Default similarity for fallback
+          metadata: {
+            ...result.metadata,
+            type: 'pdf_content',
+            source: 'redis_fallback',
+          },
+          highlight: this.extractRelevantSnippet(result.text, query),
+        }));
+      } catch (fallbackError) {
+        this.logger.error('Fallback PDF search also failed:', fallbackError);
+        return [];
+      }
+    }
+  }
+
+  /**
+   * Extract relevant snippet from text based on query
+   */
+  private extractRelevantSnippet(text: string, query: string, maxLength: number = 200): string {
+    const queryWords = query.toLowerCase().split(/\s+/).filter(word => word.length > 2);
+
+    if (queryWords.length === 0) {
+      return text.substring(0, maxLength) + (text.length > maxLength ? '...' : '');
+    }
+
+    // Find the first occurrence of any query word
+    const lowerText = text.toLowerCase();
+    let bestIndex = 0;
+    let bestScore = 0;
+
+    for (let i = 0; i < text.length - maxLength; i += 50) {
+      const snippet = lowerText.substring(i, i + maxLength);
+      const score = queryWords.reduce((acc, word) =>
+        acc + (snippet.includes(word) ? 1 : 0), 0
+      );
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    const snippet = text.substring(bestIndex, bestIndex + maxLength);
+    return (bestIndex > 0 ? '...' : '') + snippet + (bestIndex + maxLength < text.length ? '...' : '');
+  }
+
+  /**
+   * Search similar content across all vector documents
+   */
+  async searchSimilarContent(
+    referenceText: string,
+    options: {
+      limit?: number;
+      threshold?: number;
+      excludeId?: string;
+    } = {}
+  ): Promise<any[]> {
+    try {
+      const { limit = 5, threshold = 0.8, excludeId } = options;
+
+      // Generate embedding for reference text
+      const referenceEmbedding = await this.generateEmbedding(referenceText);
+
+      // Search for similar vectors
+      const results = await this.databaseService.searchVectorSimilar(
+        referenceEmbedding,
+        limit + (excludeId ? 1 : 0), // Get one extra if we need to exclude
+        threshold
+      );
+
+      // Filter out excluded ID
+      const filteredResults = excludeId
+        ? results.filter(result => result.id !== excludeId)
+        : results;
+
+      return filteredResults.slice(0, limit).map(result => ({
+        id: result.id,
+        text: result.text,
+        similarity: result.similarity,
+        metadata: result.metadata,
+      }));
+    } catch (error) {
+      this.logger.error('Error searching similar content:', error);
+      return [];
+    }
+  }
 }

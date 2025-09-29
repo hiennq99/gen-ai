@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import {
   Card,
   Table,
@@ -22,6 +22,7 @@ import {
   Tooltip,
   Drawer,
   List,
+  Select,
 } from 'antd';
 import {
   BookOutlined,
@@ -40,10 +41,12 @@ import {
   SearchOutlined,
   ClockCircleOutlined,
   ReloadOutlined,
-  ExportOutlined
+  ExportOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { spiritualGuidanceService } from '@/services/spiritualGuidance';
+import FineTunedModelManager from '@/components/FineTunedModelManagerAntd';
 
 const { TextArea } = Input;
 const { Text, Title } = Typography;
@@ -844,7 +847,6 @@ export default function SpiritualGuidance() {
                               <Statistic
                                 title="Document Matches"
                                 value={testResult.processingDetails.totalDocumentMatches}
-                                size="small"
                               />
                             </Col>
                             <Col span={8}>
@@ -852,14 +854,12 @@ export default function SpiritualGuidance() {
                                 title="Search Time"
                                 value={testResult.processingDetails.documentSearchTime}
                                 suffix="ms"
-                                size="small"
                               />
                             </Col>
                             <Col span={8}>
                               <Statistic
                                 title="AI Enhanced"
                                 value={testResult.processingDetails.aiEnhancementApplied ? 'Yes' : 'No'}
-                                size="small"
                               />
                             </Col>
                           </Row>
@@ -1111,6 +1111,11 @@ export default function SpiritualGuidance() {
               </Card>
             </Col>
           </Row>
+        </TabPane>
+
+        {/* Fine-Tuned Model Tab - NEW */}
+        <TabPane tab={<span><RobotOutlined />Fine-Tuned AI</span>} key="finetuned">
+          <FineTunedModelManager />
         </TabPane>
 
         {/* Training Upload Tab */}

@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, DeleteCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
+import { RedisVectorService, VectorDocument } from '../cache/redis-vector.service';
 
 @Injectable()
 export class DatabaseService implements OnModuleInit {
@@ -16,7 +17,10 @@ export class DatabaseService implements OnModuleInit {
     users: string;
   };
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private redisVectorService: RedisVectorService,
+  ) {
     const region = this.configService.get<string>('aws.region');
     const accessKeyId = this.configService.get<string>('aws.accessKeyId');
     const secretAccessKey = this.configService.get<string>('aws.secretAccessKey');
@@ -372,14 +376,70 @@ export class DatabaseService implements OnModuleInit {
   }
 
   async saveDocumentChunk(documentId: string, chunk: any) {
-    // Store chunks in in-memory store to avoid DynamoDB size limits
-    const chunks = this.inMemoryStore.get(`chunks-${documentId}`) || [];
-    chunks.push(chunk);
-    this.inMemoryStore.set(`chunks-${documentId}`, chunks);
+    try {
+      // Store chunk with vector in Redis
+      if (chunk.embedding && chunk.embedding.length > 0) {
+        const vectorDoc: VectorDocument = {
+          id: chunk.id,
+          text: chunk.text,
+          embedding: chunk.embedding,
+          metadata: {
+            ...chunk.metadata,
+            documentId,
+            chunkIndex: chunk.chunkIndex,
+          },
+        };
+
+        await this.redisVectorService.storeVector(vectorDoc);
+        this.logger.debug(`Stored vector chunk ${chunk.id} in Redis`);
+      } else {
+        // Fallback to in-memory store for chunks without vectors
+        const chunks = this.inMemoryStore.get(`chunks-${documentId}`) || [];
+        chunks.push(chunk);
+        this.inMemoryStore.set(`chunks-${documentId}`, chunks);
+        this.logger.debug(`Stored non-vector chunk ${chunk.id} in memory`);
+      }
+    } catch (error) {
+      this.logger.error(`Error storing chunk ${chunk.id}:`, error);
+      // Fallback to in-memory store
+      const chunks = this.inMemoryStore.get(`chunks-${documentId}`) || [];
+      chunks.push(chunk);
+      this.inMemoryStore.set(`chunks-${documentId}`, chunks);
+    }
   }
 
   async getDocumentChunks(documentId: string): Promise<any[]> {
-    return this.inMemoryStore.get(`chunks-${documentId}`) || [];
+    try {
+      // Search for chunks by documentId metadata
+      const vectorChunks = await this.redisVectorService.searchByMetadata(
+        { documentId },
+        1000 // High limit to get all chunks
+      );
+
+      if (vectorChunks.length > 0) {
+        // Convert to expected format
+        const chunks = vectorChunks.map(result => ({
+          id: result.id,
+          documentId,
+          text: result.text,
+          metadata: result.metadata,
+          chunkIndex: result.metadata.chunkIndex,
+        }));
+
+        // Sort by chunk index
+        chunks.sort((a, b) => (a.chunkIndex || 0) - (b.chunkIndex || 0));
+
+        this.logger.debug(`Retrieved ${chunks.length} vector chunks for document ${documentId}`);
+        return chunks;
+      }
+
+      // Fallback to in-memory store
+      return this.inMemoryStore.get(`chunks-${documentId}`) || [];
+    } catch (error) {
+      this.logger.error(`Error getting chunks for document ${documentId}:`, error);
+      // Fallback to in-memory store
+      return this.inMemoryStore.get(`chunks-${documentId}`) || [];
+    }
   }
 
   async updateDocumentStatus(documentId: string, status: string, metadata?: any) {
@@ -1059,5 +1119,99 @@ export class DatabaseService implements OnModuleInit {
     return tableMap[tableName] || 'training';
   }
 
-  // Removed hardcoded Q&A data - now using pure vector database approach with DynamoDB
+  // Vector database methods using Redis
+  async searchVectorSimilar(
+    queryVector: number[],
+    limit: number = 10,
+    threshold: number = 0.7
+  ): Promise<any[]> {
+    try {
+      const results = await this.redisVectorService.searchSimilar(queryVector, limit, threshold);
+
+      this.logger.debug(`Vector search returned ${results.length} results above threshold ${threshold}`);
+
+      return results.map(result => ({
+        id: result.id,
+        text: result.text,
+        metadata: result.metadata,
+        similarity: result.score,
+        documentId: result.metadata.documentId,
+        chunkIndex: result.metadata.chunkIndex,
+      }));
+    } catch (error) {
+      this.logger.error('Error performing vector similarity search:', error);
+      return [];
+    }
+  }
+
+  async storeVectorDocument(document: VectorDocument): Promise<void> {
+    try {
+      await this.redisVectorService.storeVector(document);
+      this.logger.debug(`Stored vector document: ${document.id}`);
+    } catch (error) {
+      this.logger.error(`Error storing vector document ${document.id}:`, error);
+      throw error;
+    }
+  }
+
+  async getVectorDocument(id: string): Promise<VectorDocument | null> {
+    try {
+      return await this.redisVectorService.getVector(id);
+    } catch (error) {
+      this.logger.error(`Error getting vector document ${id}:`, error);
+      return null;
+    }
+  }
+
+  async deleteVectorDocument(id: string): Promise<void> {
+    try {
+      await this.redisVectorService.deleteVector(id);
+      this.logger.debug(`Deleted vector document: ${id}`);
+    } catch (error) {
+      this.logger.error(`Error deleting vector document ${id}:`, error);
+      throw error;
+    }
+  }
+
+  async searchVectorsByMetadata(
+    filters: Record<string, any>,
+    limit: number = 10
+  ): Promise<any[]> {
+    try {
+      const results = await this.redisVectorService.searchByMetadata(filters, limit);
+
+      return results.map(result => ({
+        id: result.id,
+        text: result.text,
+        metadata: result.metadata,
+        similarity: result.score,
+        documentId: result.metadata.documentId,
+        chunkIndex: result.metadata.chunkIndex,
+      }));
+    } catch (error) {
+      this.logger.error('Error searching vectors by metadata:', error);
+      return [];
+    }
+  }
+
+  async getVectorStats(): Promise<any> {
+    try {
+      return await this.redisVectorService.getStats();
+    } catch (error) {
+      this.logger.error('Error getting vector stats:', error);
+      return { totalDocuments: 0 };
+    }
+  }
+
+  async clearVectorDatabase(): Promise<void> {
+    try {
+      await this.redisVectorService.clearAll();
+      this.logger.log('Cleared all vector documents from Redis');
+    } catch (error) {
+      this.logger.error('Error clearing vector database:', error);
+      throw error;
+    }
+  }
+
+  // Removed hardcoded Q&A data - now using pure vector database approach with Redis
 }

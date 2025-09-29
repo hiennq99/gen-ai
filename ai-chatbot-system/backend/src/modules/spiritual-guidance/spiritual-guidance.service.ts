@@ -5,6 +5,7 @@ import { EmotionMappingService } from './emotion-mapping.service';
 import { QualityControlService } from './quality-control.service';
 import { CacheService } from '../cache/cache.service';
 import { DocumentSearchService } from './document-search.service';
+import { FineTunedGuidanceService } from './fine-tuned-guidance.service';
 import {
   SpiritualGuidanceRequest,
   SpiritualGuidanceResponse,
@@ -35,13 +36,57 @@ export class SpiritualGuidanceService {
     private readonly qualityControlService: QualityControlService,
     private readonly cacheService: CacheService,
     private readonly documentSearchService: DocumentSearchService,
+    private readonly fineTunedGuidanceService: FineTunedGuidanceService,
   ) {}
 
   async provideSpiritualGuidance(request: SpiritualGuidanceRequest): Promise<HybridSpiritualGuidanceResponse> {
     try {
-      this.logger.log('Providing spiritual guidance for message', {
-        messageLength: request.message.length
+      this.logger.log('Providing fine-tuned spiritual guidance', {
+        messageLength: request.message.length,
+        useFineTuned: true
       });
+
+      // NEW APPROACH: Use fine-tuned model instead of DynamoDB queries
+      const fineTunedResponse = await this.fineTunedGuidanceService.provideSpiritualGuidance(request);
+
+      // Convert to hybrid response format
+      const hybridResponse: HybridSpiritualGuidanceResponse = {
+        ...fineTunedResponse,
+        sourceTypes: ['ai_knowledge'],
+        documentSources: [],
+        hybridConfidence: 0.85, // High confidence in fine-tuned approach
+        processingDetails: {
+          documentSearchTime: 0,
+          totalDocumentMatches: 0,
+          aiEnhancementApplied: true
+        }
+      };
+
+      // Step 2: Apply quality control
+      const validatedResponse = await this.validateFineTunedResponse(hybridResponse, request);
+
+      this.logger.log('Fine-tuned spiritual guidance provided successfully', {
+        citationLevel: validatedResponse.citationLevel,
+        templateUsed: validatedResponse.templateUsed,
+        sourceTypes: validatedResponse.sourceTypes,
+        hybridConfidence: validatedResponse.hybridConfidence,
+        qualityScore: validatedResponse.metadata?.qualityScore || 'N/A'
+      });
+
+      return validatedResponse;
+
+    } catch (error) {
+      this.logger.error('Failed to provide fine-tuned spiritual guidance, falling back to hybrid approach', error);
+      return this.provideLegacySpiritualGuidance(request);
+    }
+  }
+
+  /**
+   * Legacy method using DynamoDB queries (fallback when fine-tuned approach fails)
+   */
+  async provideLegacySpiritualGuidance(request: SpiritualGuidanceRequest): Promise<HybridSpiritualGuidanceResponse> {
+    try {
+      this.logger.log('Using legacy spiritual guidance approach');
 
       // Step 1: Analyze emotional state
       const emotionalState = request.emotionalState ||
@@ -63,7 +108,7 @@ export class SpiritualGuidanceService {
       // Step 4: Apply quality control
       const validatedResponse = await this.validateResponse(response, request, emotionalState);
 
-      this.logger.log('Hybrid spiritual guidance provided successfully', {
+      this.logger.log('Legacy spiritual guidance provided successfully', {
         citationLevel: citationMatch.level,
         confidence: citationMatch.confidence,
         combinedConfidence: citationMatch.combinedConfidence,
@@ -76,9 +121,75 @@ export class SpiritualGuidanceService {
       return validatedResponse;
 
     } catch (error) {
-      this.logger.error('Failed to provide spiritual guidance', error);
+      this.logger.error('Failed to provide legacy spiritual guidance', error);
       return this.getFallbackResponse(request.message);
     }
+  }
+
+  /**
+   * Validate fine-tuned response
+   */
+  private async validateFineTunedResponse(
+    response: HybridSpiritualGuidanceResponse,
+    _request: SpiritualGuidanceRequest
+  ): Promise<HybridSpiritualGuidanceResponse> {
+    try {
+      // Basic validation for fine-tuned responses
+      if (response.response.length < 50) {
+        response.response += " I encourage you to continue seeking spiritual guidance and support in your journey.";
+      }
+
+      // Ensure empathetic tone
+      if (!this.hasEmpatheticTone(response.response)) {
+        response.response = "I understand you're going through a difficult time. " + response.response;
+      }
+
+      // Add quality metadata
+      response.metadata = {
+        ...response.metadata,
+        validationApplied: 'fine_tuned',
+        qualityScore: this.calculateBasicQualityScore(response.response),
+        validatedAt: new Date().toISOString()
+      };
+
+      return response;
+    } catch (error) {
+      this.logger.warn('Fine-tuned validation failed, using basic validation', error);
+      return response;
+    }
+  }
+
+  /**
+   * Check if response has empathetic tone
+   */
+  private hasEmpatheticTone(response: string): boolean {
+    const empatheticPhrases = [
+      'understand', 'hear', 'sense', 'feel', 'experience',
+      'difficult', 'challenging', 'support', 'help'
+    ];
+
+    const responseLower = response.toLowerCase();
+    return empatheticPhrases.some(phrase => responseLower.includes(phrase));
+  }
+
+  /**
+   * Calculate basic quality score for fine-tuned responses
+   */
+  private calculateBasicQualityScore(response: string): number {
+    let score = 0.5; // Base score
+
+    // Length check
+    if (response.length > 100 && response.length < 800) score += 0.2;
+
+    // Empathy check
+    if (this.hasEmpatheticTone(response)) score += 0.2;
+
+    // Spiritual content check
+    const spiritualTerms = ['allah', 'prayer', 'guidance', 'spiritual', 'wisdom', 'patience'];
+    const hasSpiritual = spiritualTerms.some(term => response.toLowerCase().includes(term));
+    if (hasSpiritual) score += 0.1;
+
+    return Math.min(score, 1.0);
   }
 
   private async generateHybridResponse(

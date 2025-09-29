@@ -221,7 +221,7 @@ export const spiritualGuidanceService = {
     return response.data;
   },
 
-  async validateTrainingData(): Promise<{
+  async validateLegacyTrainingData(): Promise<{
     valid: number;
     invalid: number;
     errors: Array<{ id: string; error: string }>;
@@ -337,6 +337,291 @@ export const spiritualGuidanceService = {
     };
   }> {
     const response = await api.post('/spiritual-guidance/guidance', request);
+    return response.data;
+  },
+
+  // NEW FINE-TUNED MODEL METHODS
+
+  async prepareTrainingData(): Promise<{
+    success: boolean;
+    data: {
+      examples: any[];
+      stats: {
+        totalExamples: number;
+        byCategory: Record<string, number>;
+        byEmotionalState: Record<string, number>;
+      };
+    };
+    message: string;
+  }> {
+    const response = await api.post('/admin/spiritual-guidance/fine-tuned/prepare-training-data');
+    return response.data;
+  },
+
+  async saveTrainingDataToFile(options?: {
+    filename?: string;
+    includeValidation?: boolean;
+  }): Promise<{
+    success: boolean;
+    data: {
+      filePath: string;
+      stats: any;
+      validation?: any;
+    };
+    message: string;
+  }> {
+    const response = await api.post('/admin/spiritual-guidance/fine-tuned/save-training-data', options || {});
+    return response.data;
+  },
+
+  async validateTrainingData(): Promise<{
+    success: boolean;
+    data: {
+      valid: boolean;
+      issues: string[];
+      stats: any;
+    };
+    message: string;
+  }> {
+    const response = await api.post('/admin/spiritual-guidance/fine-tuned/validate-training-data');
+    return response.data;
+  },
+
+  async trainFineTunedModel(): Promise<{
+    success: boolean;
+    modelId?: string;
+    trainingJobId?: string;
+    message: string;
+  }> {
+    const response = await api.post('/admin/spiritual-guidance/fine-tuned/train-model');
+    return response.data;
+  },
+
+  async getFineTunedModelStatus(): Promise<{
+    success: boolean;
+    data: {
+      config: any;
+      stats: {
+        totalRequests: number;
+        averageResponseTime: number;
+        cacheHitRate: number;
+      };
+    };
+  }> {
+    const response = await api.get('/admin/spiritual-guidance/fine-tuned/model-status');
+    return response.data;
+  },
+
+  async testFineTunedGuidance(request: {
+    message: string;
+    conversationHistory?: string[];
+  }): Promise<{
+    success: boolean;
+    data: {
+      response: string;
+      citations: any[];
+      citationLevel: string;
+      templateUsed: string;
+      metadata?: any;
+    };
+  }> {
+    const response = await api.post('/admin/spiritual-guidance/fine-tuned/test-guidance', request);
+    return response.data;
+  },
+
+  // NEW Q&A TRAINING METHODS
+
+  async prepareQATrainingData(): Promise<{
+    success: boolean;
+    data: {
+      examples: any[];
+      stats: {
+        totalExamples: number;
+        byCategory: Record<string, number>;
+        byEmotionalState: Record<string, number>;
+        byDifficulty: Record<string, number>;
+      };
+    };
+    message: string;
+  }> {
+    const response = await api.post('/admin/spiritual-guidance/qa/prepare-training-data');
+    return response.data;
+  },
+
+  async validateQATrainingData(): Promise<{
+    success: boolean;
+    data: {
+      valid: boolean;
+      issues: string[];
+      stats: {
+        total: number;
+        valid: number;
+        invalid: number;
+        validationRate: number;
+      };
+    };
+    message: string;
+  }> {
+    const response = await api.post('/admin/spiritual-guidance/qa/validate-training-data');
+    return response.data;
+  },
+
+  async saveQATrainingData(options?: {
+    filename?: string;
+  }): Promise<{
+    success: boolean;
+    data: {
+      filePath: string;
+      stats: any;
+    };
+    message: string;
+  }> {
+    const response = await api.post('/admin/spiritual-guidance/qa/save-training-data', options || {});
+    return response.data;
+  },
+
+  async addCustomQAPairs(qaPairs: Array<{
+    question: string;
+    answer: string;
+    category?: string;
+    emotionalState?: string;
+  }>): Promise<{
+    success: boolean;
+    data: {
+      addedExamples: number;
+      examples: any[];
+    };
+    message: string;
+  }> {
+    const response = await api.post('/admin/spiritual-guidance/qa/add-custom-pairs', { qaPairs });
+    return response.data;
+  },
+
+  async importQAPairsFromFile(file: File): Promise<{
+    success: boolean;
+    data: {
+      importedPairs: number;
+      pairs: any[];
+    };
+    message: string;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await api.post('/admin/spiritual-guidance/qa/import-from-file', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  async testDirectQAResponse(request: {
+    message: string;
+    conversationHistory?: string[];
+  }): Promise<{
+    success: boolean;
+    data: {
+      response: string;
+      citations: any[];
+      citationLevel: string;
+      templateUsed: string;
+      metadata?: any;
+    };
+    note: string;
+  }> {
+    const response = await api.post('/admin/spiritual-guidance/qa/test-direct-response', request);
+    return response.data;
+  },
+
+  // CSV TESTING METHODS (No Database Queries)
+
+  async testWithCSVData(file: File): Promise<{
+    success: boolean;
+    data: {
+      examples: any[];
+      stats: {
+        totalExamples: number;
+        byCategory: Record<string, number>;
+        byEmotionalState: Record<string, number>;
+      };
+    };
+    message: string;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await api.post('/admin/spiritual-guidance/qa/test-csv-data', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  async testAIResponseWithCSV(request: {
+    csvFilePath: string;
+    testQuestion: string;
+  }): Promise<{
+    success: boolean;
+    data: {
+      question: string;
+      aiResponse: string;
+      matchedTrainingData?: any;
+      confidence: number;
+    };
+    message: string;
+  }> {
+    const response = await api.post('/admin/spiritual-guidance/qa/test-ai-response-csv', request);
+    return response.data;
+  },
+
+  // FILE UPLOAD METHODS
+
+  async uploadCSVData(file: File): Promise<{
+    success: boolean;
+    data: {
+      importedPairs: number;
+      stats: {
+        totalExamples: number;
+        byCategory: Record<string, number>;
+        byEmotionalState: Record<string, number>;
+      };
+    };
+    message: string;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await api.post('/admin/spiritual-guidance/qa/upload-csv', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  async uploadPDFDocument(file: File): Promise<{
+    success: boolean;
+    data: {
+      extractedText: string;
+      generatedQAPairs: number;
+      stats: {
+        totalExamples: number;
+        byCategory: Record<string, number>;
+        byEmotionalState: Record<string, number>;
+      };
+    };
+    message: string;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await api.post('/admin/spiritual-guidance/documents/upload-pdf', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
     return response.data;
   }
 };

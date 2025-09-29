@@ -102,7 +102,7 @@ const renderFormattedText = (text: string) => {
     const trimmedLine = line.trim();
 
     // Check for all types of bullet points (▪️, •, -, *, ○, ●, ▸, ►)
-    if (trimmedLine.match(/^[▪️•\-\*○●▸►]\s*/) || trimmedLine.startsWith('▪️')) {
+    if (trimmedLine.match(/^[•\-*○●▸►]\s*/) || trimmedLine.startsWith('▪️')) {
       return (
         <div key={index} style={{
           marginLeft: '20px',
@@ -116,7 +116,7 @@ const renderFormattedText = (text: string) => {
             color: '#059669',
             fontWeight: 'bold'
           }}>•</span>
-          {trimmedLine.replace(/^[▪️•\-\*○●▸►]\s*/, '')}
+          {trimmedLine.replace(/^[•\-*○●▸►]\s*/, '').replace(/^▪️\s*/, '')}
         </div>
       );
     }
@@ -169,7 +169,7 @@ const renderFormattedText = (text: string) => {
     }
 
     // Check for Quranic verses (quoted text)
-    if (trimmedLine.match(/^[""].+[""]/) || trimmedLine.match(/^\".+\"$/)) {
+    if (trimmedLine.match(/^[""].+[""]/) || trimmedLine.match(/^".+"$/)) {
       return (
         <div key={index} style={{
           fontStyle: 'italic',

@@ -7,6 +7,10 @@ import { QualityControlService } from './quality-control.service';
 import { DocumentSearchService } from './document-search.service';
 import { SpiritualGuidanceAdminController } from './admin/spiritual-guidance-admin.controller';
 import { SpiritualGuidanceAdminService } from './admin/spiritual-guidance-admin.service';
+import { TrainingDataService } from './training-data.service';
+import { QATrainingService } from './qa-training.service';
+import { SourceTrackingService } from './source-tracking.service';
+import { FineTunedGuidanceService } from './fine-tuned-guidance.service';
 import { DatabaseModule } from '../database/database.module';
 import { CacheModule } from '../cache/cache.module';
 import { BedrockModule } from '../bedrock/bedrock.module';
@@ -21,7 +25,11 @@ import { EmotionModule } from '../emotion/emotion.module';
     EmotionMappingService,
     QualityControlService,
     DocumentSearchService,
-    SpiritualGuidanceAdminService
+    SpiritualGuidanceAdminService,
+    TrainingDataService,
+    QATrainingService,
+    SourceTrackingService,
+    FineTunedGuidanceService
   ],
   exports: [
     SpiritualGuidanceService,
@@ -29,7 +37,11 @@ import { EmotionModule } from '../emotion/emotion.module';
     EmotionMappingService,
     QualityControlService,
     DocumentSearchService,
-    SpiritualGuidanceAdminService
+    SpiritualGuidanceAdminService,
+    TrainingDataService,
+    QATrainingService,
+    SourceTrackingService,
+    FineTunedGuidanceService
   ],
 })
 export class SpiritualGuidanceModule {}

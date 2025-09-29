@@ -4,6 +4,7 @@ import {
   DashboardOutlined,
   FileTextOutlined,
   ExperimentOutlined,
+  CloudUploadOutlined,
   MessageOutlined,
   SettingOutlined,
   RobotOutlined,
@@ -30,6 +31,11 @@ const menuItems = [
     key: '/training',
     icon: <ExperimentOutlined />,
     label: 'Training',
+  },
+  {
+    key: '/upload',
+    icon: <CloudUploadOutlined />,
+    label: 'Upload Data',
   },
   {
     key: '/conversations',
