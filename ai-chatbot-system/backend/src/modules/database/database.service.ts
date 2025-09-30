@@ -161,29 +161,43 @@ export class DatabaseService implements OnModuleInit {
       if (sessionId === '*') {
         return conversations;
       }
-      return conversations.filter((c: any) => c.sessionId === sessionId).slice(-20);
+      // Filter by sessionId and sort by timestamp (chronological order)
+      return conversations
+        .filter((c: any) => c.sessionId === sessionId)
+        .sort((a: any, b: any) => {
+          const timeA = new Date(a.createdAtISO || a.createdAt).getTime();
+          const timeB = new Date(b.createdAtISO || b.createdAt).getTime();
+          return timeA - timeB;
+        });
     }
-    
+
     try {
       // If sessionId is '*', return all conversations
       if (sessionId === '*') {
         return this.getAllConversations();
       }
-      
+
       // Use Scan instead of Query since we're filtering by sessionId, not primary key
+      // Removed Limit to get ALL messages in the session
       const command = new ScanCommand({
         TableName: this.tables.conversations,
         FilterExpression: 'sessionId = :sessionId',
         ExpressionAttributeValues: {
           ':sessionId': sessionId,
         },
-        Limit: 20,
       });
-      
+
       const response = await this.docClient.send(command);
-      return response.Items || [];
+      const items = response.Items || [];
+
+      // Sort by timestamp (chronological order)
+      return items.sort((a: any, b: any) => {
+        const timeA = new Date(a.createdAtISO || a.createdAt).getTime();
+        const timeB = new Date(b.createdAtISO || b.createdAt).getTime();
+        return timeA - timeB;
+      });
     } catch (error: any) {
-      if (error.name === 'ResourceNotFoundException' || 
+      if (error.name === 'ResourceNotFoundException' ||
           error.message?.includes('Query condition missed key schema') ||
           error.message?.includes('key schema element')) {
         this.logger.warn('DynamoDB table issue, using in-memory storage:', error.message);
@@ -193,7 +207,13 @@ export class DatabaseService implements OnModuleInit {
         if (sessionId === '*') {
           return conversations;
         }
-        return conversations.filter((c: any) => c.sessionId === sessionId).slice(-20);
+        return conversations
+          .filter((c: any) => c.sessionId === sessionId)
+          .sort((a: any, b: any) => {
+            const timeA = new Date(a.createdAtISO || a.createdAt).getTime();
+            const timeB = new Date(b.createdAtISO || b.createdAt).getTime();
+            return timeA - timeB;
+          });
       }
       this.logger.error('Error fetching conversation history:', error.name, error.message || error);
       return [];

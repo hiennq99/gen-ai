@@ -59,15 +59,25 @@ export class SearchService implements OnModuleInit {
         await this.client.indices.create({
           index: this.indices.documents,
           body: {
+            settings: {
+              index: {
+                knn: true,
+              },
+            },
             mappings: {
               properties: {
                 documentId: { type: "keyword" },
                 content: { type: "text" },
+                text: { type: "text" },
+                title: { type: "text" },
                 embedding: {
-                  type: "dense_vector",
-                  dims: 1536,
-                  index: true,
-                  similarity: "cosine",
+                  type: "knn_vector",
+                  dimension: 1024,
+                  method: {
+                    name: "hnsw",
+                    space_type: "cosinesimil",
+                    engine: "lucene",
+                  },
                 },
                 metadata: { type: "object" },
                 createdAt: { type: "date" },
@@ -146,8 +156,8 @@ export class SearchService implements OnModuleInit {
         }
       }
 
-      // Generate embedding with semantic clustering
-      const embedding = Array.from({ length: 1536 }, (_, i) => {
+      // Generate embedding with semantic clustering (1024 dims for Bedrock Titan compatibility)
+      const embedding = Array.from({ length: 1024 }, (_, i) => {
         let seed = hash + i;
 
         // Add semantic clustering for common concepts
@@ -173,8 +183,8 @@ export class SearchService implements OnModuleInit {
       return embedding;
     } catch (error) {
       this.logger.debug("Error generating embedding, using fallback:", error.message);
-      // Return default embedding on error
-      return Array.from({ length: 1536 }, () => 0);
+      // Return default embedding on error (1024 dims for Bedrock Titan)
+      return Array.from({ length: 1024 }, () => 0);
     }
   }
 
@@ -188,17 +198,33 @@ export class SearchService implements OnModuleInit {
         return { indexed: false, reason: 'OpenSearch not configured' };
       }
 
+      // Prepare document for indexing
+      const indexDoc: any = {
+        ...document,
+        createdAt: new Date().toISOString(),
+      };
+
+      // Ensure embedding is an array of numbers (if present)
+      // AWS Bedrock Titan embeddings are 1024 dimensions
+      if (indexDoc.embedding) {
+        if (!Array.isArray(indexDoc.embedding)) {
+          this.logger.warn('Embedding is not an array, skipping');
+          delete indexDoc.embedding;
+        } else if (indexDoc.embedding.length !== 1024) {
+          this.logger.warn(`Embedding dimension mismatch: ${indexDoc.embedding.length}, expected 1024, skipping`);
+          delete indexDoc.embedding;
+        }
+      }
+
       const response = await this.client.index({
         index: this.indices.documents,
-        body: {
-          ...document,
-          createdAt: new Date().toISOString(),
-        },
+        body: indexDoc,
       });
 
-      await this.client.indices.refresh({
-        index: this.indices.documents,
-      });
+      // Don't refresh after every document (expensive)
+      // await this.client.indices.refresh({
+      //   index: this.indices.documents,
+      // });
 
       return response.body;
     } catch (error: any) {
@@ -206,8 +232,66 @@ export class SearchService implements OnModuleInit {
         this.logger.debug('OpenSearch connection failed - skipping indexing');
         return { indexed: false, reason: 'OpenSearch unavailable' };
       }
-      this.logger.error("Error indexing document:", error);
+      this.logger.error("Error indexing document:", error.message || error);
+      if (error.meta?.body) {
+        this.logger.error("OpenSearch error details:", JSON.stringify(error.meta.body));
+      }
       // Don't throw, return error status instead
+      return { indexed: false, error: error.message };
+    }
+  }
+
+  async bulkIndexDocuments(documents: any[]) {
+    try {
+      const node = this.configService.get<string>("opensearch.node");
+      if (!node || node.includes('localhost')) {
+        this.logger.debug('Skipping bulk indexing - OpenSearch not available');
+        return { indexed: false, reason: 'OpenSearch not configured' };
+      }
+
+      if (documents.length === 0) {
+        return { indexed: true, count: 0 };
+      }
+
+      // Prepare bulk operations
+      const body = documents.flatMap((doc: any) => {
+        const indexDoc: any = {
+          ...doc,
+          createdAt: new Date().toISOString(),
+        };
+
+        // Validate embedding (AWS Bedrock Titan = 1024 dimensions)
+        if (indexDoc.embedding) {
+          if (!Array.isArray(indexDoc.embedding) || indexDoc.embedding.length !== 1024) {
+            delete indexDoc.embedding;
+          }
+        }
+
+        return [
+          { index: { _index: this.indices.documents, _id: doc.id } },
+          indexDoc
+        ];
+      });
+
+      const response = await this.client.bulk({ body });
+
+      if (response.body.errors) {
+        const errorCount = response.body.items.filter((item: any) => item.index?.error).length;
+        this.logger.warn(`Bulk index completed with ${errorCount} errors out of ${documents.length} documents`);
+      }
+
+      // Refresh index after bulk operation
+      await this.client.indices.refresh({
+        index: this.indices.documents,
+      });
+
+      return {
+        indexed: true,
+        count: documents.length,
+        errors: response.body.errors ? response.body.items.filter((item: any) => item.index?.error) : []
+      };
+    } catch (error: any) {
+      this.logger.error("Error in bulk indexing:", error.message || error);
       return { indexed: false, error: error.message };
     }
   }
@@ -235,7 +319,8 @@ export class SearchService implements OnModuleInit {
       // Generate embedding for query
       const queryEmbedding = await this.generateEmbedding(query);
 
-      // Build search query
+      // Build search query - text-based search for now
+      // TODO: Implement k-NN vector search properly with OpenSearch 3.x syntax
       const searchBody = {
         size: limit,
         min_score: minScore,
@@ -243,23 +328,10 @@ export class SearchService implements OnModuleInit {
           bool: {
             should: [
               {
-                match: {
-                  content: {
-                    query,
-                    boost: 2,
-                  },
-                },
-              },
-              {
-                script_score: {
-                  query: { match_all: {} },
-                  script: {
-                    source:
-                      "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
-                    params: {
-                      query_vector: queryEmbedding,
-                    },
-                  },
+                multi_match: {
+                  query,
+                  fields: ['content^2', 'text^1.5', 'title^3'],
+                  type: 'best_fields',
                 },
               },
             ],

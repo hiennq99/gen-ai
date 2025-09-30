@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { QueueService } from '../queue/queue.service';
 import { DocumentsService } from '../documents/documents.service';
+import { SearchService } from '../search/search.service';
 import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
@@ -13,6 +14,7 @@ export class TrainingService {
     private readonly databaseService: DatabaseService,
     private readonly queueService: QueueService,
     private readonly _documentsService: DocumentsService,
+    private readonly searchService: SearchService,
   ) {}
 
   async startTraining(trainingData: any) {
@@ -246,8 +248,10 @@ export class TrainingService {
         throw new BadRequestException('CSV file contains no valid question/answer pairs');
       }
 
-      // Save Q&A data to database
+      // Save Q&A data to database AND generate embeddings for vector search
       const qaResults = [];
+      let embeddingsCreated = 0;
+
       for (const row of csvData) {
         const qaId = uuidv4();
 
@@ -272,10 +276,37 @@ export class TrainingService {
         try {
           await this.databaseService.saveQAData(qaData);
           qaResults.push(qaData);
+
+          // Generate embedding for the question and index it for semantic search
+          this.logger.log(`Generating embedding for Q&A pair ${qaResults.length}/${csvData.length}: ${row.question.substring(0, 50)}...`);
+
+          const embedding = await this.searchService.generateEmbedding(row.question);
+
+          // Index the Q&A pair with embedding
+          await this.searchService.indexDocument({
+            id: qaId,
+            documentId: jobId, // Use jobId as documentId for CSV uploads
+            content: row.question, // Store question as content for search
+            embedding,
+            metadata: {
+              type: 'qa_exact_match',
+              question: row.question,
+              answer: enhancedAnswer,
+              source: 'csv_upload',
+              jobId,
+              uploadedAt: new Date().toISOString(),
+              ...row.metadata,
+            },
+          });
+
+          embeddingsCreated++;
+          this.logger.log(`✅ Indexed Q&A pair ${embeddingsCreated}/${csvData.length}`);
         } catch (error) {
-          this.logger.warn(`Failed to save Q&A pair ${qaId}:`, error);
+          this.logger.warn(`Failed to save/index Q&A pair ${qaId}:`, error);
         }
       }
+
+      this.logger.log(`🎉 Successfully created ${embeddingsCreated} vector embeddings for Q&A pairs`);
 
       // Create training job
       const newJob = {
@@ -317,8 +348,9 @@ export class TrainingService {
       return {
         jobId,
         status: 'completed',
-        message: `Successfully processed ${qaResults.length} Q&A pairs from CSV`,
+        message: `Successfully processed ${qaResults.length} Q&A pairs from CSV and created ${embeddingsCreated} vector embeddings`,
         recordsProcessed: qaResults.length,
+        embeddingsCreated,
         totalRows: csvData.length,
       };
 

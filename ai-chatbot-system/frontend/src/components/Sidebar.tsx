@@ -150,15 +150,15 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                       <Clock className="w-3 h-3" />
                       {(() => {
                         try {
-                          const date = session.updatedAt instanceof Date 
-                            ? session.updatedAt 
-                            : new Date(session.updatedAt);
-                          
+                          const date = session.createdAt instanceof Date
+                            ? session.createdAt
+                            : new Date(session.createdAt);
+
                           // Check if date is valid
                           if (isNaN(date.getTime())) {
                             return 'Recently';
                           }
-                          
+
                           return format(date, 'MMM d, HH:mm');
                         } catch {
                           return 'Recently';

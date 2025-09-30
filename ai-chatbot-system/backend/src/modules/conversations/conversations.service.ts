@@ -91,7 +91,7 @@ export class ConversationsService {
   private transformConversations(conversations: any[]) {
     // Group by session
     const sessionMap = new Map<string, any[]>();
-    
+
     conversations.forEach((conv: any) => {
       const sessionId = conv.sessionId || 'default';
       if (!sessionMap.has(sessionId)) {
@@ -102,16 +102,24 @@ export class ConversationsService {
 
     // Transform to frontend format
     return Array.from(sessionMap.entries()).map(([sessionId, convs]) => {
+      // Sort by timestamp to ensure chronological order
+      convs.sort((a, b) => {
+        const timeA = new Date(a.createdAtISO || a.createdAt).getTime();
+        const timeB = new Date(b.createdAtISO || b.createdAt).getTime();
+        return timeA - timeB;
+      });
+
       const emotions = convs.map((c: any) => c.emotion?.primaryEmotion).filter(Boolean);
       const confidences = convs.map((c: any) => c.confidence).filter(Boolean);
-      
+
       const dominantEmotion = this.getMostFrequent(emotions) || 'neutral';
       const avgConfidence = confidences.length > 0
         ? Math.round(confidences.reduce((a, b) => a + b, 0) / confidences.length)
         : 0;
 
-      const startTime = new Date(convs[0].createdAt);
-      const endTime = new Date(convs[convs.length - 1].createdAt);
+      // Use the EARLIEST message timestamp as start time (first message after sorting)
+      const startTime = new Date(convs[0].createdAtISO || convs[0].createdAt);
+      const endTime = new Date(convs[convs.length - 1].createdAtISO || convs[convs.length - 1].createdAt);
       const duration = (endTime.getTime() - startTime.getTime()) / 1000; // in seconds
 
       // Generate title from first user message
@@ -130,15 +138,20 @@ export class ConversationsService {
         dominantEmotion,
         avgConfidence,
         duration,
-        startedAt: convs[0].createdAt,
+        startedAt: convs[0].createdAtISO || convs[0].createdAt,
         rating: convs[0].rating || null,
         messages: this.buildMessages(convs),
       };
+    }).sort((a, b) => {
+      // Sort by startedAt (most recent first)
+      const timeA = new Date(a.startedAt).getTime();
+      const timeB = new Date(b.startedAt).getTime();
+      return timeB - timeA;
     });
   }
 
   private buildMessages(conversations: any[]) {
-    return conversations.slice(0, 5).map((conv: any) => [
+    return conversations.map((conv: any) => [
       {
         role: 'user',
         content: conv.userMessage,

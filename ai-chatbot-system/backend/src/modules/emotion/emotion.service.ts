@@ -1,13 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import * as Sentiment from 'sentiment';
+import Sentiment from 'sentiment';
 import { EmotionAnalysis, EmotionType, EmotionIntensity, ResponseEmotionTags } from './interfaces/emotion.interface';
 
 @Injectable()
 export class EmotionService {
   private readonly logger = new Logger(EmotionService.name);
-  private readonly sentiment: Sentiment;
+  private readonly sentiment: any;
   private readonly bedrockClient: BedrockRuntimeClient;
   private readonly useAIAnalysis: boolean;
   

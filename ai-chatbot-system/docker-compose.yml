@@ -39,6 +39,11 @@ services:
       - DYNAMODB_QA_TABLE=ai-chatbot-qa
       - S3_DOCUMENTS_BUCKET=ai-chatbot-documents-a354f3e7
       - S3_MEDIA_BUCKET=ai-chatbot-media-a354f3e7
+      - OPENSEARCH_NODE=${OPENSEARCH_NODE}
+      - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME}
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD}
+      - OPENSEARCH_DOCUMENTS_INDEX=${OPENSEARCH_DOCUMENTS_INDEX:-ai-chatbot-documents}
+      - OPENSEARCH_CONVERSATIONS_INDEX=${OPENSEARCH_CONVERSATIONS_INDEX:-ai-chatbot-conversations}
       - JWT_SECRET=your_jwt_secret_key_here_change_this_in_production
       - FRONTEND_URL=http://localhost:3001
       - ADMIN_URL=http://localhost:5173

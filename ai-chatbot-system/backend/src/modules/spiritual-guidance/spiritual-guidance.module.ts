@@ -11,6 +11,8 @@ import { TrainingDataService } from './training-data.service';
 import { QATrainingService } from './qa-training.service';
 import { SourceTrackingService } from './source-tracking.service';
 import { FineTunedGuidanceService } from './fine-tuned-guidance.service';
+import { EvidenceParserService } from './evidence-parser.service';
+import { EvidenceChunkService } from './evidence-chunk.service';
 import { DatabaseModule } from '../database/database.module';
 import { CacheModule } from '../cache/cache.module';
 import { BedrockModule } from '../bedrock/bedrock.module';
@@ -29,7 +31,9 @@ import { EmotionModule } from '../emotion/emotion.module';
     TrainingDataService,
     QATrainingService,
     SourceTrackingService,
-    FineTunedGuidanceService
+    FineTunedGuidanceService,
+    EvidenceParserService,
+    EvidenceChunkService,
   ],
   exports: [
     SpiritualGuidanceService,
@@ -41,7 +45,9 @@ import { EmotionModule } from '../emotion/emotion.module';
     TrainingDataService,
     QATrainingService,
     SourceTrackingService,
-    FineTunedGuidanceService
+    FineTunedGuidanceService,
+    EvidenceParserService,
+    EvidenceChunkService,
   ],
 })
 export class SpiritualGuidanceModule {}

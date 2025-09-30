@@ -2,9 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { BedrockService } from '../bedrock/bedrock.service';
 import { SearchService } from '../search/search.service';
+import { EvidenceParserService } from './evidence-parser.service';
+import { EvidenceChunkService } from './evidence-chunk.service';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import * as pdfParse from 'pdf-parse';
+import pdfParse from 'pdf-parse';
 
 export interface QATrainingExample {
   question: string;
@@ -40,6 +42,8 @@ export class QATrainingService {
     private readonly databaseService: DatabaseService,
     private readonly bedrockService: BedrockService,
     private readonly searchService: SearchService,
+    private readonly evidenceParser: EvidenceParserService,
+    private readonly evidenceChunkService: EvidenceChunkService,
   ) {}
 
   /**
@@ -819,6 +823,7 @@ Response:`;
 
   /**
    * Process PDF document and store as vectors for semantic search
+   * Uses evidence-based chunking: embeds symptoms, returns evidence only
    */
   async processPDFWithVectors(pdfFilePath: string): Promise<{
     documentId: string;
@@ -827,71 +832,80 @@ Response:`;
     vectorsGenerated: number;
     indexedChunks: number;
   }> {
-    this.logger.log('Processing PDF document with vector storage');
+    this.logger.log('Processing PDF document with evidence-based vector storage');
 
     try {
       const documentId = `pdf-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
       // Extract text from PDF
       const extractedText = await this.extractTextFromPDF(pdfFilePath);
+      this.logger.log(`Extracted ${extractedText.length} characters from PDF`);
 
-      // Create text chunks
-      const chunks = this.createTextChunks(extractedText);
-      this.logger.log(`Created ${chunks.length} text chunks from PDF`);
+      // Create evidence-based chunks (search by symptoms, return evidence)
+      const evidenceChunks = await this.evidenceChunkService.createEvidenceChunks(
+        extractedText,
+        path.basename(pdfFilePath)
+      );
+
+      this.logger.log(`Created ${evidenceChunks.length} evidence-based chunks`);
 
       let vectorsGenerated = 0;
       let indexedChunks = 0;
 
-      // Process each chunk
-      for (const chunk of chunks) {
+      // Process chunks with progress logging
+      this.logger.log(`Starting to process ${evidenceChunks.length} chunks...`);
+      const startTime = Date.now();
+
+      for (const chunk of evidenceChunks) {
         try {
-          // Generate embedding for the chunk
-          const embedding = await this.searchService.generateEmbedding(chunk.text);
+          // Generate embedding for the SEARCH TEXT (disease + symptoms)
+          const embedding = await this.searchService.generateEmbedding(chunk.searchText);
           vectorsGenerated++;
 
-          // Create document chunk with metadata
-          const documentChunk = {
-            id: `${documentId}-chunk-${chunk.index}`,
-            documentId,
-            chunkIndex: chunk.index,
-            text: chunk.text,
-            embedding,
-            metadata: {
-              sourceFile: path.basename(pdfFilePath),
-              filePath: pdfFilePath,
-              startPosition: chunk.startPosition,
-              endPosition: chunk.endPosition,
-              type: 'pdf_content',
-              chunkSize: chunk.text.length,
-              processedAt: new Date().toISOString(),
-            },
-          };
+          // Log progress every 10 chunks (since we have fewer chunks now)
+          if (vectorsGenerated % 10 === 0 || vectorsGenerated === evidenceChunks.length) {
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            const rate = elapsed > 0 ? vectorsGenerated / elapsed : 0;
+            const remaining = rate > 0 ? Math.round((evidenceChunks.length - vectorsGenerated) / rate) : 0;
+            this.logger.log(`Progress: ${vectorsGenerated}/${evidenceChunks.length} chunks (${Math.round(vectorsGenerated/evidenceChunks.length*100)}%) - ETA: ${remaining}s`);
+          }
+
+          // Store in format compatible with SearchService
+          const storageFormat = this.evidenceChunkService.formatForStorage(chunk);
 
           // Store chunk in database
-          await this.databaseService.saveDocumentChunk(documentId, documentChunk);
+          await this.databaseService.saveDocumentChunk(documentId, {
+            id: chunk.id,
+            documentId,
+            chunkIndex: chunk.chunkIndex,
+            text: chunk.searchText,  // For searching
+            embedding,
+            metadata: storageFormat.metadata,
+          });
 
           // Index in search service for vector search
           try {
             await this.searchService.indexDocument({
-              id: documentChunk.id,
+              id: chunk.id,
               documentId,
-              title: `${path.basename(pdfFilePath)} - Chunk ${chunk.index + 1}`,
-              content: chunk.text,
-              text: chunk.text,
+              title: `${chunk.disease}${chunk.arabicName ? ` (${chunk.arabicName})` : ''}`,
+              content: chunk.searchText,  // Symptoms for searching
+              text: chunk.searchText,
               embedding,
-              metadata: documentChunk.metadata,
+              metadata: storageFormat.metadata,  // Includes evidenceText
             });
             indexedChunks++;
           } catch (indexError) {
-            this.logger.warn(`Failed to index chunk ${chunk.index}, continuing...`, indexError);
+            this.logger.warn(`Failed to index chunk ${chunk.chunkIndex}, continuing...`, indexError);
           }
 
-          this.logger.debug(`Processed chunk ${chunk.index + 1}/${chunks.length}: ${chunk.text.substring(0, 50)}...`);
-
         } catch (chunkError) {
-          this.logger.error(`Failed to process chunk ${chunk.index}:`, chunkError);
+          this.logger.error(`Failed to process chunk ${chunk.chunkIndex}:`, chunkError);
         }
       }
+
+      const totalTime = Math.round((Date.now() - startTime) / 1000);
+      this.logger.log(`Completed processing in ${totalTime}s (avg: ${(totalTime/evidenceChunks.length).toFixed(2)}s per chunk)`);
 
       // Save document metadata
       await this.databaseService.saveDocument({
@@ -903,21 +917,22 @@ Response:`;
           originalName: path.basename(pdfFilePath),
           filePath: pdfFilePath,
           contentLength: extractedText.length,
-          totalChunks: chunks.length,
+          totalChunks: evidenceChunks.length,
           processedChunks: vectorsGenerated,
           indexedChunks,
           hasVectors: true,
+          evidenceBased: true,  // Mark as evidence-based
         },
         uploadedAt: Date.now(),
         status: 'processed',
       });
 
-      this.logger.log(`Successfully processed PDF: ${vectorsGenerated}/${chunks.length} chunks with vectors, ${indexedChunks} indexed`);
+      this.logger.log(`Successfully processed PDF: ${vectorsGenerated}/${evidenceChunks.length} evidence chunks with vectors, ${indexedChunks} indexed`);
 
       return {
         documentId,
         extractedText,
-        chunksCreated: chunks.length,
+        chunksCreated: evidenceChunks.length,
         vectorsGenerated,
         indexedChunks,
       };

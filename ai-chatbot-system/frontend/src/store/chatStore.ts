@@ -225,7 +225,9 @@ export const useChatStore = create<ChatStore>()(
           const sessions: ChatSession[] = conversations
             .filter((conv: any) => conv && conv.sessionId) // Filter out invalid entries
             .map((conv: any) => {
-              const createdAt = conv.createdAt ? new Date(conv.createdAt) : new Date();
+              // Backend returns 'startedAt' not 'createdAt'
+              const createdAt = conv.startedAt ? new Date(conv.startedAt) :
+                               (conv.createdAt ? new Date(conv.createdAt) : new Date());
               const updatedAt = conv.updatedAt ? new Date(conv.updatedAt) : createdAt;
               
               return {
@@ -270,7 +272,7 @@ export const useChatStore = create<ChatStore>()(
           });
 
           const groupedSessions = Array.from(sessionMap.values())
-            .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+            .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
           set({ sessions: groupedSessions, isLoading: false });
         } catch (error) {
