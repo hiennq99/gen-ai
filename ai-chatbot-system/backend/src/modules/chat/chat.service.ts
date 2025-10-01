@@ -47,10 +47,10 @@ export class ChatService {
       .replace(/\b([A-Z])\s+([a-z]{2,})/g, '$1$2')
       // Fix broken Quranic references like "[A\nl-Baqarah" -> "[Al-Baqarah"
       .replace(/\[A\s*\n?\s*l-/g, '[Al-')
-      // Preserve bullet points and list markers (o, •, -, *)
-      .replace(/\n([o•\-*])\s/g, '\n\n$1 ')
-      // Remove single newlines (join paragraphs) but keep bullet points
-      .replace(/([^\n])\n(?![o•\-*\n])([^\n])/g, '$1 $2')
+      // Preserve bullet points and list markers (o, •, -, *, ▪)
+      .replace(/\n([o•\-*▪])\s/g, '\n\n$1 ')
+      // PRESERVE ALL line breaks - DO NOT join any lines
+      // PDF formatting is intentional, keep it as-is
       // Add proper line breaks after quotes with references
       .replace(/("\s*\[[^\]]+\])/g, '$1\n\n')
       // Add line break before new evidence sections
@@ -59,8 +59,8 @@ export class ChatService {
       .replace(/(Imām\s+[^:]+said:)/gi, '\n\n$1')
       // Normalize multiple newlines to double newline (paragraph breaks)
       .replace(/\n{3,}/g, '\n\n')
-      // Normalize multiple spaces
-      .replace(/\s{2,}/g, ' ')
+      // Normalize multiple spaces (but NOT newlines)
+      .replace(/[ \t]{2,}/g, ' ')
       // Remove page numbers
       .replace(/\[p\.\s*\d+\]/g, '')
       .trim();
@@ -162,15 +162,25 @@ export class ChatService {
         }
       }
 
-      // Decision logic:
-      // - Always require ≥95% confidence to use document (for both first and subsequent messages)
-      // - Otherwise use AI interpretation with conversation context
-      const useDocumentMode = bestDocument !== null && documentConfidence >= 95;
+      // TIER 1: Vector Database with relevance ≥ 95%
+      // - Return exact answer without modification + cite source
+      const useTier1VectorDB = bestDocument !== null && documentConfidence >= 95;
 
-      this.logger.log(`📊 Mode Decision: isFirstMessage=${isFirstMessage}, documentScore=${documentScore.toFixed(3)}, confidence=${documentConfidence.toFixed(1)}%, useDocument=${useDocumentMode} (requires ≥95%)`);
+      // TIER 2: PDF Training Data (if no Tier 1 match)
+      // - Use AI to search knowledge from trained PDFs + cite source
+      // - Only trigger if no high-confidence vector match
 
-      if (useDocumentMode) {
-        // Return the exact content from the best matching training document
+      // TIER 3: AI Knowledge + Conversation Context (fallback)
+      // - Use Claude's general knowledge + conversation history
+
+      this.logger.log(`📊 Decision Logic: isFirstMessage=${isFirstMessage}, documentScore=${documentScore.toFixed(3)}, confidence=${documentConfidence.toFixed(1)}%`);
+      this.logger.log(`📊 TIER 1 (Vector DB ≥95%): ${useTier1VectorDB ? 'YES ✓' : 'NO'}`);
+
+      if (useTier1VectorDB) {
+        // ===== TIER 1: EXACT VECTOR DATABASE MATCH (≥95% confidence) =====
+        // Return exact answer without modification + cite source
+        this.logger.log(`🎯 TIER 1 ACTIVATED: Using Vector DB exact match (${documentConfidence.toFixed(1)}% confidence)`);
+
         const bestMatch = searchResults[0];
 
         // Check the type of match
@@ -268,8 +278,20 @@ export class ChatService {
             sourceFile: bestMatch.metadata?.sourceFile,
             chunkIndex: bestMatch.metadata?.chunkIndex,
             evidenceCount: bestMatch.metadata?.evidenceCount,
+            chapterNumber: bestMatch.metadata?.chapterNumber,
+            chapterName: bestMatch.metadata?.chapterName,
           };
-          sourceDisplay = `📖 Source: ${bestMatch.metadata?.sourceFile || 'PDF Document'}\n🏥 Topic: ${bestMatch.metadata?.disease || 'Spiritual Medicine'}`;
+
+          // Build citation with chapter information
+          const fileName = bestMatch.metadata?.sourceFile || 'PDF Document';
+          const chapterNum = bestMatch.metadata?.chapterNumber;
+          const chapterName = bestMatch.metadata?.chapterName || bestMatch.metadata?.disease;
+
+          if (chapterNum && chapterName) {
+            sourceDisplay = `📖 Source: ${fileName}\n📑 Chapter ${chapterNum}: ${chapterName}`;
+          } else {
+            sourceDisplay = `📖 Source: ${fileName}\n🏥 Topic: ${chapterName || 'Spiritual Medicine'}`;
+          }
         } else {
           // Other document types
           sourceInfo = {
@@ -281,10 +303,13 @@ export class ChatService {
           sourceDisplay = `📄 Source: ${bestMatch.title || 'Document'}`;
         }
 
+        // Append citation to content for user display
+        const contentWithCitation = `${formattedContent}\n\n${sourceDisplay}`;
+
         // Format as direct response
         const response: ChatResponse = {
           id: messageId,
-          content: formattedContent,
+          content: contentWithCitation,
           media: dummyMedia,
           emotion: emotionAnalysis.primaryEmotion,
           emotionTags,
@@ -350,9 +375,12 @@ export class ChatService {
         return response;
       }
 
-      // AI INTERPRETATION MODE: No documents OR low confidence on 2nd+ message - use AI with conversation context
-      // This path handles both: (1) no documents found, (2) 2nd+ message with <95% confidence
-      this.logger.log(`Using AI interpretation mode: hasDocuments=${searchResults.length > 0}, confidence=${documentConfidence.toFixed(1)}%, isFirstMessage=${isFirstMessage}`);
+      // ===== TIER 2 & TIER 3: NO EXACT MATCH FROM VECTOR DB =====
+      // Check if we have lower-confidence documents that might contain relevant PDF training data
+      const hasLowerConfidenceDocs = searchResults.length > 0 && documentConfidence < 95;
+
+      this.logger.log(`📊 TIER 2 (PDF Training): ${hasLowerConfidenceDocs ? 'Checking...' : 'NO'}`);
+      this.logger.log(`📊 TIER 3 (AI Knowledge): Will be used as fallback`);
 
       // Build conversation context from history for AI
       const conversationContext = conversationHistory.slice(-5).map((msg: any) => {
@@ -364,77 +392,174 @@ export class ChatService {
           return '';
         }).filter(Boolean).join('\n');
 
-        // Create context-aware prompt for AI
-        const contextualPrompt = conversationContext
-          ? `You are a helpful, empathetic AI assistant specialized in spiritual guidance and mental wellness. Respond naturally and conversationally.\n\nPrevious conversation:\n${conversationContext}\n\nUser's current question: ${request.message}\n\nProvide a helpful, warm, and supportive response:`
-          : `You are a helpful, empathetic AI assistant specialized in spiritual guidance and mental wellness. Respond naturally and conversationally.\n\nUser question: ${request.message}\n\nProvide a helpful, warm, and supportive response:`;
+      // TIER 2: Try to use PDF training data through AI
+      // Collect PDF evidence from lower-confidence matches
+      let pdfTrainingContext = '';
+      if (hasLowerConfidenceDocs) {
+        const pdfDocuments = searchResults.filter((doc: any) =>
+          doc.metadata?.type === 'evidence' ||
+          doc.metadata?.sourceFile?.endsWith('.pdf')
+        ).slice(0, 3); // Top 3 PDF documents
 
-        // Generate AI response using Bedrock
-        const aiGeneratedResponse = await this.bedrockService.invokeModel({
-          messages: [{ role: 'user', content: contextualPrompt }],
-          maxTokens: 300,
-          temperature: 0.7
-        });
+        if (pdfDocuments.length > 0) {
+          this.logger.log(`🎯 TIER 2 ACTIVATED: Found ${pdfDocuments.length} PDF training documents (${documentConfidence.toFixed(1)}% confidence)`);
 
-        // Add empathetic header to AI response
-        const emotionalHeader = this.personalityService.generateEmpatheticHeader(
-          emotionAnalysis.primaryEmotion,
-          conversationHistory.length === 0,
-          request.message
-        );
+          pdfTrainingContext = '\n\nRELEVANT TRAINING DATA FROM PDF DOCUMENTS:\n';
+          pdfDocuments.forEach((doc: any, index: number) => {
+            const evidence = doc.metadata?.evidenceText || doc.content || doc.text || '';
+            const source = doc.metadata?.sourceFile || doc.metadata?.disease || 'PDF Document';
+            const cleanedEvidence = this.cleanEvidenceText(evidence);
 
-        const aiResponse = `${emotionalHeader}\n\n${aiGeneratedResponse.content || 'I\'m here to support you. How can I help you further?'}`;
+            pdfTrainingContext += `\n[Training Document ${index + 1}] Source: "${source}"\n`;
+            pdfTrainingContext += `Content: ${cleanedEvidence.substring(0, 800)}...\n`;
+          });
 
-        const emotionTags = this.emotionService.generateResponseEmotionTags(emotionAnalysis);
-        const emotionSummary = this.emotionService.getEmotionSummary(emotionAnalysis);
-        const responseStyleText = this.emotionService.getResponseStyleText(emotionTags);
+          pdfTrainingContext += '\n⚠️ IMPORTANT INSTRUCTIONS FOR USING TRAINING DATA:\n';
+          pdfTrainingContext += '1. DO NOT modify or paraphrase the training data - use exact quotes\n';
+          pdfTrainingContext += '2. ALWAYS cite the source document name when using training data\n';
+          pdfTrainingContext += '3. If training data does not match the question, use your general knowledge instead\n';
+        }
+      }
 
-        const dummyMedia = this.mediaService.generateDummyMedia(
-          emotionAnalysis.primaryEmotion,
-          request.message,
-          false
-        );
+      // Create comprehensive prompt for AI (TIER 2 + TIER 3)
+      let contextualPrompt = '';
 
-        const response: ChatResponse = {
-          id: messageId,
-          content: aiResponse,
-          media: dummyMedia,
-          emotion: emotionAnalysis.primaryEmotion,
-          emotionTags,
-          confidence: 70,
-          processingTime: Date.now() - startTime,
-          metadata: {
-            sessionId: request.sessionId,
-            emotionAnalysis,
-            emotionSummary,
-            responseStyleText,
-            documentsUsed: 0,
-            documents: [],
-            cached: false,
-            contextInfo: {
-              totalDocuments: 0,
-              contextUsed: true,
-              message: 'AI interpretation mode: No documents found, using conversation context and AI knowledge',
-              firstMessage: conversationHistory.length === 0,
-            },
-            mode: 'ai-interpretation',
-          },
-        };
+      if (pdfTrainingContext) {
+        // TIER 2: PDF Training Data Mode
+        contextualPrompt = `You are a helpful, empathetic AI assistant specialized in spiritual guidance and mental wellness.
 
-        await this.saveConversation({
-          messageId,
+${pdfTrainingContext}
+
+${conversationContext ? `Previous conversation:\n${conversationContext}\n\n` : ''}User's current question: ${request.message}
+
+RESPONSE GUIDELINES:
+1. First, check if the training data above is relevant (similarity check)
+2. If relevant: Use EXACT quotes from training data + cite the source document
+3. If NOT relevant: Use your general AI knowledge + conversation context
+4. Always be warm, empathetic, and supportive
+5. Never modify training data - quote it exactly as written
+
+FORMATTING REQUIREMENTS (VERY IMPORTANT):
+- Preserve ALL line breaks from original text (use \n\n for paragraphs)
+- Preserve bullet points and numbered lists exactly as they appear
+- Preserve section headings and formatting
+- Keep all whitespace and indentation from original
+- Do NOT reformat or restructure the content
+
+CITATION FORMAT (MANDATORY):
+- When using training data, end your response with:
+  "📚 Source: [Document Name]"
+- Example: "📚 Source: Ibn Daud - A Handbook of Spiritual Medicine"
+
+Provide your response with proper formatting and citation:`;
+      } else {
+        // TIER 3: Pure AI Knowledge + Context Mode
+        this.logger.log(`🎯 TIER 3 ACTIVATED: No PDF training data available, using AI knowledge + context`);
+
+        contextualPrompt = conversationContext
+          ? `You are a helpful, empathetic AI assistant specialized in spiritual guidance and mental wellness. Respond naturally and conversationally.\n\nPrevious conversation:\n${conversationContext}\n\nUser's current question: ${request.message}\n\nProvide a helpful, warm, and supportive response based on your knowledge and the conversation context:`
+          : `You are a helpful, empathetic AI assistant specialized in spiritual guidance and mental wellness. Respond naturally and conversationally.\n\nUser question: ${request.message}\n\nProvide a helpful, warm, and supportive response based on your knowledge:`;
+      }
+
+      // Generate AI response using Bedrock (for both TIER 2 and TIER 3)
+      const aiGeneratedResponse = await this.bedrockService.invokeModel({
+        messages: [{ role: 'user', content: contextualPrompt }],
+        maxTokens: 500, // Increased for PDF context
+        temperature: 0.7
+      });
+
+      // Add empathetic header to AI response
+      const emotionalHeader = this.personalityService.generateEmpatheticHeader(
+        emotionAnalysis.primaryEmotion,
+        conversationHistory.length === 0,
+        request.message
+      );
+
+      // Build AI response with proper citation
+      let aiResponseContent = aiGeneratedResponse.content || 'I\'m here to support you. How can I help you further?';
+
+      // Add source citation if using PDF training data
+      if (pdfTrainingContext && searchResults.length > 0) {
+        const sources = searchResults.slice(0, 3).map((doc: any) =>
+          doc.metadata?.sourceFile || doc.metadata?.disease || 'PDF Document'
+        ).filter((v: string, i: number, a: string[]) => a.indexOf(v) === i); // unique sources
+
+        // Check if Claude already added citation, if not add it
+        if (!aiResponseContent.includes('📚 Source:') && !aiResponseContent.includes('Source:')) {
+          aiResponseContent += `\n\n📚 **Source:** ${sources.join(', ')}`;
+        }
+      }
+
+      const aiResponse = `${emotionalHeader}\n\n${aiResponseContent}`;
+
+      const emotionTags = this.emotionService.generateResponseEmotionTags(emotionAnalysis);
+      const emotionSummary = this.emotionService.getEmotionSummary(emotionAnalysis);
+      const responseStyleText = this.emotionService.getResponseStyleText(emotionTags);
+
+      const dummyMedia = this.mediaService.generateDummyMedia(
+        emotionAnalysis.primaryEmotion,
+        request.message,
+        true // Enable media generation (static image + GIF)
+      );
+
+      // Determine which tier was actually used
+      const activeTier = pdfTrainingContext ? 'tier-2-pdf-training' : 'tier-3-ai-knowledge';
+      const tierMessage = pdfTrainingContext
+        ? `TIER 2: AI using PDF training data (${searchResults.length} PDF documents found with ${documentConfidence.toFixed(1)}% confidence)`
+        : `TIER 3: Pure AI knowledge + conversation context (no high-confidence training data available)`;
+
+      this.logger.log(`✅ Response generated using ${activeTier.toUpperCase()}`);
+
+      const response: ChatResponse = {
+        id: messageId,
+        content: aiResponse,
+        media: dummyMedia,
+        emotion: emotionAnalysis.primaryEmotion,
+        emotionTags,
+        confidence: pdfTrainingContext ? 75 : 65, // Higher confidence if using PDF training
+        processingTime: Date.now() - startTime,
+        metadata: {
           sessionId: request.sessionId,
-          userId: request.userId,
-          userMessage: request.message,
-          assistantMessage: response.content,
-          emotion: emotionAnalysis,
-          emotionTags,
-          processingTime: Date.now() - startTime,
-          metadata: {
-            mode: 'ai-interpretation',
-            media: dummyMedia,
+          emotionAnalysis,
+          emotionSummary,
+          responseStyleText,
+          documentsUsed: pdfTrainingContext ? searchResults.length : 0,
+          documents: pdfTrainingContext ? searchResults.slice(0, 3).map((doc: any) => ({
+            title: doc.metadata?.sourceFile || doc.metadata?.disease || 'PDF Document',
+            relevanceScore: (doc.score * 100).toFixed(1) + '%',
+            excerpt: (doc.metadata?.evidenceText || doc.content || '').substring(0, 200),
+            type: 'pdf-training',
+            source: doc.metadata?.sourceFile,
+          })) : [],
+          cached: false,
+          contextInfo: {
+            totalDocuments: searchResults.length,
+            contextUsed: true,
+            message: tierMessage,
+            tier: activeTier,
+            pdfTrainingUsed: !!pdfTrainingContext,
+            firstMessage: conversationHistory.length === 0,
           },
-        });
+          mode: activeTier,
+        },
+      };
+
+      await this.saveConversation({
+        messageId,
+        sessionId: request.sessionId,
+        userId: request.userId,
+        userMessage: request.message,
+        assistantMessage: response.content,
+        emotion: emotionAnalysis,
+        emotionTags,
+        processingTime: Date.now() - startTime,
+        metadata: {
+          mode: activeTier,
+          tier: activeTier,
+          pdfDocumentsUsed: pdfTrainingContext ? searchResults.length : 0,
+          media: dummyMedia,
+        },
+      });
 
       return response;
     } catch (error) {

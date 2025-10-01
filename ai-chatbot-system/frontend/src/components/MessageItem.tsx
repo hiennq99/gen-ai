@@ -101,6 +101,22 @@ const renderFormattedText = (text: string) => {
   return formattedText.split('\n').map((line, index) => {
     const trimmedLine = line.trim();
 
+    // Check for citation/source (📚 Source:)
+    if (trimmedLine.match(/^📚\s*(Source|Nguồn):/i)) {
+      return (
+        <div key={index} style={{
+          marginTop: '16px',
+          paddingTop: '12px',
+          borderTop: '1px solid #e5e7eb',
+          fontSize: '13px',
+          color: '#6b7280',
+          fontStyle: 'italic'
+        }}>
+          {trimmedLine}
+        </div>
+      );
+    }
+
     // Check for bullet points (▪️, •, -, *, ○, ●, ▸, ►)
     if (trimmedLine.match(/^[▪️•\-\*○●▸►]\s*/) || trimmedLine.startsWith('▪️')) {
       return (
@@ -116,7 +132,28 @@ const renderFormattedText = (text: string) => {
             color: '#059669',
             fontWeight: 'bold'
           }}>•</span>
-          {trimmedLine.replace(/^[▪️•\-\*○●▸►]\s*/, '')}
+          {renderTextWithBold(trimmedLine.replace(/^[▪️•\-\*○●▸►]\s*/, ''))}
+        </div>
+      );
+    }
+
+    // Check for numbered lists (1. 2. 3. etc)
+    const numberedMatch = trimmedLine.match(/^(\d+)\.\s+(.+)$/);
+    if (numberedMatch) {
+      return (
+        <div key={index} style={{
+          marginLeft: '20px',
+          marginBottom: '6px',
+          position: 'relative',
+          paddingLeft: '20px'
+        }}>
+          <span style={{
+            position: 'absolute',
+            left: '0',
+            color: '#059669',
+            fontWeight: 'bold'
+          }}>{numberedMatch[1]}.</span>
+          {renderTextWithBold(numberedMatch[2])}
         </div>
       );
     }
@@ -141,16 +178,27 @@ const renderFormattedText = (text: string) => {
       return <div key={index} style={{ height: '8px' }} />;
     }
 
-    // Regular lines
+    // Regular lines (with bold support)
     return (
       <div key={index} style={{
         marginBottom: '6px',
         lineHeight: '1.6',
         color: '#374151'
       }}>
-        {trimmedLine}
+        {renderTextWithBold(trimmedLine)}
       </div>
     );
+  });
+};
+
+// Helper to render text with **bold** markdown
+const renderTextWithBold = (text: string) => {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    return part;
   });
 };
 
@@ -231,21 +279,26 @@ export default function MessageItem({ message }: MessageItemProps) {
                 message.media.map((media, index) => (
                   <div key={index}>
                     {media.type === 'image' && media.url && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={media.url}
-                        alt={media.caption || 'Attachment'}
-                        className="rounded-lg max-w-full"
-                        onError={(e) => {
-                          // Fallback to default image if provided media fails to load
-                          const target = e.target as HTMLImageElement;
-                          const defaultImage = getDefaultImage(
-                            message.emotion || message.emotionTags?.inputEmotions?.[0],
-                            message.content
-                          );
-                          target.src = defaultImage.url;
-                        }}
-                      />
+                      <div className="my-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={media.url}
+                          alt={media.caption || 'Attachment'}
+                          className="rounded-lg max-w-full max-h-64 object-contain shadow-md"
+                          onError={(e) => {
+                            // Fallback to default image if provided media fails to load
+                            const target = e.target as HTMLImageElement;
+                            const defaultImage = getDefaultImage(
+                              message.emotion || message.emotionTags?.inputEmotions?.[0],
+                              message.content
+                            );
+                            target.src = defaultImage.url;
+                          }}
+                        />
+                        {media.caption && (
+                          <p className="text-xs text-gray-400 mt-1 italic">{media.caption}</p>
+                        )}
+                      </div>
                     )}
                     {media.type === 'suggestion' && (
                       <div className="bg-white/10 rounded p-2 text-sm">
@@ -262,18 +315,21 @@ export default function MessageItem({ message }: MessageItemProps) {
                     message.content
                   );
                   return (
-                    <div>
+                    <div className="my-2">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={defaultImage.url}
                         alt={defaultImage.caption}
-                        className="rounded-lg max-w-full opacity-90"
+                        className="rounded-lg max-w-full max-h-64 object-contain shadow-md opacity-90"
                         onError={(e) => {
                           // Fallback to a simple placeholder if image fails to load
                           const target = e.target as HTMLImageElement;
                           target.src = 'https://picsum.photos/400/300?random=1';
                         }}
                       />
+                      {defaultImage.caption && (
+                        <p className="text-xs text-gray-400 mt-1 italic">{defaultImage.caption}</p>
+                      )}
                     </div>
                   );
                 })()

@@ -11,6 +11,7 @@ import {
   Input,
   Dropdown,
   Progress,
+  Tooltip,
 } from 'antd';
 import {
   UploadOutlined,
@@ -141,7 +142,7 @@ export default function Documents() {
       dataIndex: 'status',
       key: 'status',
       width: 150,
-      render: (status: string) => {
+      render: (status: string, record: any) => {
         const statusConfig: Record<string, { color: string; text: string }> = {
           processed: { color: 'success', text: 'Processed' },
           completed: { color: 'success', text: 'Processed' }, // backward compatibility
@@ -150,7 +151,25 @@ export default function Documents() {
           pending: { color: 'default', text: 'Pending' },
         };
         const config = statusConfig[status] || statusConfig.pending;
-        return <Tag color={config.color}>{config.text}</Tag>;
+
+        // Show training status if available
+        const isTrained = record.metadata?.claudeTrained;
+        const trainingStatus = record.metadata?.trainingStatus;
+        const trainingSummary = record.metadata?.trainingSummary;
+
+        return (
+          <Space direction="vertical" size={0}>
+            <Tag color={config.color}>{config.text}</Tag>
+            {isTrained && trainingSummary ? (
+              <Tooltip title={trainingSummary} placement="left" overlayStyle={{ maxWidth: 400 }}>
+                <Tag color="purple" style={{ fontSize: 10, cursor: 'help' }}>🎓 Trained</Tag>
+              </Tooltip>
+            ) : isTrained && (
+              <Tag color="purple" style={{ fontSize: 10 }}>🎓 Trained</Tag>
+            )}
+            {trainingStatus === 'training-failed' && <Tag color="orange" style={{ fontSize: 10 }}>⚠️ Training Failed</Tag>}
+          </Space>
+        );
       },
     },
     {
@@ -320,11 +339,26 @@ export default function Documents() {
           <p className="ant-upload-hint">
             Support PDF, DOCX, TXT, JSON files. Max size: 10MB
           </p>
+          <div style={{ marginTop: 16, padding: '12px', backgroundColor: '#f0f5ff', borderRadius: 6 }}>
+            <p style={{ margin: 0, fontSize: 13, color: '#1890ff' }}>
+              <strong>🎓 AI Training Feature:</strong>
+            </p>
+            <p style={{ margin: '4px 0 0 0', fontSize: 12, color: '#666' }}>
+              When you upload a PDF, Claude AI will read and memorize its content.
+              <br />
+              This enables the AI to recall and cite information from your document when answering questions.
+            </p>
+          </div>
         </Dragger>
         {uploadMutation.isPending && (
           <div style={{ marginTop: 16 }}>
             <Progress percent={50} status="active" />
-            <p style={{ textAlign: 'center', marginTop: 8 }}>Processing document...</p>
+            <p style={{ textAlign: 'center', marginTop: 8, fontWeight: 500 }}>
+              🎓 Training Claude AI on document content...
+            </p>
+            <p style={{ textAlign: 'center', marginTop: 4, fontSize: 12, color: '#666' }}>
+              This may take a few moments depending on document size
+            </p>
           </div>
         )}
       </Modal>

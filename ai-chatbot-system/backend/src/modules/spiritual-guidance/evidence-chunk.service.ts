@@ -23,6 +23,8 @@ export interface EvidenceChunk {
   chunkIndex: number;
   sourceFile: string;
   pageNumber?: number;
+  chapterNumber?: number; // Chapter number from PDF
+  chapterName?: string; // Chapter title/disease name
 }
 
 /**
@@ -184,6 +186,8 @@ export class EvidenceChunkService {
           type: 'evidence',
           chunkIndex,
           sourceFile,
+          chapterNumber: parseInt(chapterNumMatch[1]),
+          chapterName: diseaseName,
         };
 
         chunks.push(chunk);
@@ -341,18 +345,19 @@ export class EvidenceChunkService {
    */
   private cleanEvidenceText(text: string): string {
     return text
-      // Fix broken words with newlines: "F\norgetfulness" -> "Forgetfulness"
+      // Fix broken words with newlines: "F\norgetfulness" -> "Forgetfulness" (Capital + lowercase)
       .replace(/([A-Z])\n([a-z])/g, '$1$2')
       // Fix broken words with spaces at word boundaries: "Y our" -> "Your", "Th e" -> "The"
       .replace(/\b([A-Z])\s+([a-z]{2,})/g, '$1$2')
       // Fix broken single letters at start: "F orgetfulness" -> "Forgetfulness"
       .replace(/\n([A-Z])\s+([a-z])/g, '\n$1$2')
+      // Fix ONLY truly broken words: single letter + newline + longer word
+      .replace(/\b([a-z])\n([a-z]{3,})\b/g, '$1$2')
       // Normalize multiple newlines to double newline (paragraph breaks)
       .replace(/\n{3,}/g, '\n\n')
-      // Remove single newlines within sentences (but keep double newlines for paragraphs)
-      .replace(/([^\n])\n([^\n])/g, '$1 $2')
-      // Normalize multiple spaces
-      .replace(/\s{2,}/g, ' ')
+      // PRESERVE ALL OTHER line breaks - DO NOT join complete words
+      // Normalize multiple spaces (but NOT newlines)
+      .replace(/[ \t]{2,}/g, ' ')
       // Fix broken Quranic references like "[A\nl-Baqarah" -> "[Al-Baqarah"
       .replace(/\[A\s*\nl-/g, '[Al-')
       .replace(/\[A\s+l-/g, '[Al-')

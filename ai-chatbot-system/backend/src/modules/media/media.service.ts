@@ -12,7 +12,72 @@ export interface DummyMedia {
 export class MediaService {
   private readonly logger = new Logger(MediaService.name);
 
-  // Dummy image URLs from free services
+  // GIF URLs from Giphy/Tenor (using media CDN links - no API key needed)
+  private readonly dummyGifs = {
+    happy: [
+      'https://media.giphy.com/media/XR9Dp54ZC4dji/giphy.gif', // Happy celebration
+      'https://media.giphy.com/media/artj92V8o75VPL7AeQ/giphy.gif', // Happy dance
+      'https://media.giphy.com/media/11sBLVxNs7v6WA/giphy.gif', // Excited
+      'https://media.giphy.com/media/5GoVLqeAOo6PK/giphy.gif', // Joy
+      'https://media.giphy.com/media/3oz8xIsloV7zOmt81G/giphy.gif' // Celebration
+    ],
+    sad: [
+      'https://media.giphy.com/media/L95W4wv8nnb9K/giphy.gif', // Comforting
+      'https://media.giphy.com/media/3oEdv4hwWTzBhWvaU0/giphy.gif', // Hugging
+      'https://media.giphy.com/media/ZBQhoZC0nqknSviPqT/giphy.gif', // Support
+      'https://media.giphy.com/media/42D3CxaINsAFemFuId/giphy.gif' // Care
+    ],
+    angry: [
+      'https://media.giphy.com/media/8rEVtjWcJoNI5miInv/giphy.gif', // Deep breath
+      'https://media.giphy.com/media/krP2NRkLqnKEg/giphy.gif', // Calm down
+      'https://media.giphy.com/media/MEtSuIu6qu0HC/giphy.gif', // Meditation
+      'https://media.giphy.com/media/3o7TKMt1VVNkHV2PaE/giphy.gif' // Relaxation
+    ],
+    fear: [
+      'https://media.giphy.com/media/3og0IMJcSI8p6hYQXS/giphy.gif', // Reassurance
+      'https://media.giphy.com/media/l3q2Z6S6n38zjPswo/giphy.gif', // Safety
+      'https://media.giphy.com/media/l2Sq29cFXoF80ADlK/giphy.gif', // Protection
+      'https://media.giphy.com/media/xT0xeuOy2Fcl9vDGiA/giphy.gif' // Comfort
+    ],
+    surprise: [
+      'https://media.giphy.com/media/5VKbvrjxpVJCM/giphy.gif', // Wow
+      'https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif', // Amazing
+      'https://media.giphy.com/media/3o7btPCcdNniyf0ArS/giphy.gif', // Mind blown
+      'https://media.giphy.com/media/Um3ljJl8jrnHy/giphy.gif' // Astonished
+    ],
+    grateful: [
+      'https://media.giphy.com/media/ZfK4cXKJTTay1Ava29/giphy.gif', // Thank you
+      'https://media.giphy.com/media/3oz8xIsloV7zOmt81G/giphy.gif', // Gratitude
+      'https://media.giphy.com/media/yoJC2GnSClbPOkV0eA/giphy.gif', // Appreciation
+      'https://media.giphy.com/media/26xBI73gWquCBBCDe/giphy.gif' // Blessed
+    ],
+    confused: [
+      'https://media.giphy.com/media/3o7btPCcdNniyf0ArS/giphy.gif', // Thinking
+      'https://media.giphy.com/media/3o7buirYcmV5nSwIRW/giphy.gif', // Puzzled
+      'https://media.giphy.com/media/a5viI92PAF89q/giphy.gif', // Confused
+      'https://media.giphy.com/media/26xBxZdlxksm4oCje/giphy.gif' // Question marks
+    ],
+    urgent: [
+      'https://media.giphy.com/media/l0HlBO7eyXzSZkJri/giphy.gif', // Quick
+      'https://media.giphy.com/media/5nsiFjdgylfK3csZ5T/giphy.gif', // Fast
+      'https://media.giphy.com/media/xTiTnqUxyWbsAXq7Ju/giphy.gif', // Hurry
+      'https://media.giphy.com/media/3rgXBBaVvhPXk3NLRm/giphy.gif' // Speed
+    ],
+    neutral: [
+      'https://media.giphy.com/media/3oriO0OEd9QIDdllqo/giphy.gif', // Nodding
+      'https://media.giphy.com/media/l0HlBO7eyXzSZkJri/giphy.gif', // Okay
+      'https://media.giphy.com/media/d31w24psGYeekCZy/giphy.gif', // Thumbs up
+      'https://media.giphy.com/media/l3vRfNA1p0rvhMSvS/giphy.gif' // Agreement
+    ],
+    disgust: [
+      'https://media.giphy.com/media/DsdVe5jhHWNC8/giphy.gif', // Cleanse
+      'https://media.giphy.com/media/l4FGpP4lxGGgK5CBW/giphy.gif', // Fresh
+      'https://media.giphy.com/media/3o6ZtaiPZNzrmRQ6YM/giphy.gif', // Better
+      'https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif' // Positive
+    ]
+  };
+
+  // Dummy image URLs from free services (kept as fallback)
   private readonly dummyImages = {
     happy: [
       'https://picsum.photos/400/300?random=1',
@@ -72,32 +137,38 @@ export class MediaService {
     messageContent: string,
     includeMedia: boolean = true
   ): DummyMedia[] {
+    this.logger.log(`🎬 generateDummyMedia called - emotion: ${emotion}, includeMedia: ${includeMedia}`);
+
     if (!includeMedia) {
+      this.logger.log('📵 Media generation disabled');
       return [];
     }
 
     const media: DummyMedia[] = [];
 
-    // ALWAYS include at least one image at the end of responses
-    media.push(this.generateDummyImage(emotion, messageContent));
+    // ALWAYS include both a static image AND a GIF
+    // 1. Add a static image first
+    const staticImage = this.generateStaticImage(emotion, messageContent);
+    media.push(staticImage);
+    this.logger.log(`📷 Added static image: ${staticImage.url}`);
 
-    // 50% chance to add additional media (video or suggestions)
-    const shouldAddMoreMedia = Math.random() > 0.5;
+    // 2. Add a GIF second
+    const gifImage = this.generateGifImage(emotion, messageContent);
+    media.push(gifImage);
+    this.logger.log(`🎬 Added GIF: ${gifImage.url}`);
 
-    if (shouldAddMoreMedia) {
-      // Determine additional media types based on emotion and content
-      const additionalMediaTypes = this.determineAdditionalMediaTypes(emotion, messageContent);
-
-      for (const mediaType of additionalMediaTypes) {
-        if (mediaType === 'video') {
-          media.push(this.generateDummyVideo(emotion, messageContent));
-        } else if (mediaType === 'suggestion') {
-          media.push(...this.generateSuggestions(emotion, messageContent));
-        }
+    // Optional: 30% chance to add suggestions
+    const shouldAddSuggestions = Math.random() > 0.7;
+    if (shouldAddSuggestions) {
+      const suggestions = this.generateSuggestions(emotion, messageContent);
+      if (suggestions.length > 0) {
+        media.push(suggestions[0]); // Add only 1 suggestion
+        this.logger.log(`💡 Added suggestion`);
       }
     }
 
-    return media.slice(0, 3); // Limit to 3 media items per response (image + 2 additional)
+    this.logger.log(`✅ Generated ${media.length} media items`);
+    return media.slice(0, 3); // Limit to 3 media items (static + gif + optional suggestion)
   }
 
   private determineAdditionalMediaTypes(emotion: EmotionType, messageContent: string): string[] {
@@ -132,7 +203,8 @@ export class MediaService {
     return ['image'];
   }
 
-  private generateDummyImage(emotion: EmotionType, messageContent: string): DummyMedia {
+  // Generate static image only
+  private generateStaticImage(emotion: EmotionType, messageContent: string): DummyMedia {
     const emotionImages = this.dummyImages[emotion] || this.dummyImages.neutral;
     const randomImage = emotionImages[Math.floor(Math.random() * emotionImages.length)];
 
@@ -141,6 +213,30 @@ export class MediaService {
       url: randomImage,
       caption: this.generateImageCaption(emotion, messageContent)
     };
+  }
+
+  // Generate GIF only
+  private generateGifImage(emotion: EmotionType, messageContent: string): DummyMedia {
+    const emotionGifs = this.dummyGifs[emotion] || this.dummyGifs.neutral;
+    const randomGif = emotionGifs[Math.floor(Math.random() * emotionGifs.length)];
+
+    return {
+      type: 'image',
+      url: randomGif,
+      caption: `${emotion.charAt(0).toUpperCase() + emotion.slice(1)} vibes 🎬`
+    };
+  }
+
+  // Legacy method - kept for backward compatibility
+  private generateDummyImage(emotion: EmotionType, messageContent: string): DummyMedia {
+    // Random between static and GIF
+    const useGif = Math.random() > 0.5;
+
+    if (useGif) {
+      return this.generateGifImage(emotion, messageContent);
+    } else {
+      return this.generateStaticImage(emotion, messageContent);
+    }
   }
 
   private generateDummyVideo(emotion: EmotionType, messageContent: string): DummyMedia {

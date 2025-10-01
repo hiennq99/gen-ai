@@ -27,4 +27,5 @@ export interface ProcessingResult {
   chunksCreated: number;
   status: string;
   error?: string;
+  claudeTrained?: boolean;
 }

@@ -1,9 +1,11 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { DocumentProcessor } from './document-processor.service';
 import { QASplitterService } from './qa-splitter.service';
+import { ClaudeTrainingService } from './claude-training.service';
 import { StorageService } from '../storage/storage.service';
 import { SearchService } from '../search/search.service';
 import { DatabaseService } from '../database/database.service';
+import { EvidenceChunkService } from '../spiritual-guidance/evidence-chunk.service';
 import { v4 as uuidv4 } from 'uuid';
 import { Document, DocumentChunk, ProcessingResult } from './interfaces/document.interface';
 
@@ -16,9 +18,11 @@ export class DocumentsService {
   constructor(
     private readonly documentProcessor: DocumentProcessor,
     private readonly qaSplitter: QASplitterService,
+    private readonly claudeTrainingService: ClaudeTrainingService,
     private readonly storageService: StorageService,
     private readonly searchService: SearchService,
     private readonly databaseService: DatabaseService,
+    private readonly evidenceChunkService: EvidenceChunkService,
   ) {}
 
   async uploadDocument(file: Express.Multer.File, metadata?: any): Promise<Document> {
@@ -36,13 +40,20 @@ export class DocumentsService {
       // Extract content based on file type
       const content = await this.documentProcessor.extractContent(file);
 
-      // Check if content is Q&A format
-      const qaPairs = this.qaSplitter.detectAndSplitQA(content, file.originalname);
-      
-      if (qaPairs && qaPairs.length > 0) {
-        // Process as Q&A document - split into individual entries
-        this.logger.log(`Detected ${qaPairs.length} Q&A pairs in document ${file.originalname}`);
-        return await this.processQADocument(file, qaPairs, metadata, s3Url);
+      // Check if content is Q&A format (ONLY for CSV/TXT, not PDF)
+      // PDFs always go through Claude Training flow
+      const isPDF = file.mimetype === 'application/pdf' || file.originalname.endsWith('.pdf');
+
+      if (!isPDF) {
+        const qaPairs = this.qaSplitter.detectAndSplitQA(content, file.originalname);
+
+        if (qaPairs && qaPairs.length > 0) {
+          // Process as Q&A document - split into individual entries
+          this.logger.log(`Detected ${qaPairs.length} Q&A pairs in document ${file.originalname}`);
+          return await this.processQADocument(file, qaPairs, metadata, s3Url);
+        }
+      } else {
+        this.logger.log(`PDF detected: ${file.originalname} - will train Claude AI on full content`);
       }
 
       // Create document record (don't save full content here to avoid size limits)
@@ -69,8 +80,8 @@ export class DocumentsService {
       // Save to database
       await this.databaseService.saveDocument(document);
 
-      // Process content asynchronously
-      this.processDocumentContent(documentId, content).catch(error => {
+      // Process content asynchronously (including training)
+      this.processDocumentContent(documentId, content, file.originalname, metadata).catch(error => {
         this.logger.error(`Failed to process document ${documentId}:`, error);
       });
 
@@ -184,17 +195,69 @@ export class DocumentsService {
     return parentDocument;
   }
 
-  async processDocumentContent(documentId: string, content: string): Promise<ProcessingResult> {
+  async processDocumentContent(
+    documentId: string,
+    content: string,
+    fileName?: string,
+    metadata?: any
+  ): Promise<ProcessingResult> {
     try {
-      // Generate chunks
-      const chunks = this.createChunks(content);
-      
+      // STEP 1: Train Claude on the document content (NEW FEATURE)
+      this.logger.log(`🎓 Step 1: Training Claude on document content...`);
+
+      let trainingResult;
+      try {
+        trainingResult = await this.claudeTrainingService.trainOnDocument(
+          documentId,
+          fileName || documentId,
+          content,
+          metadata
+        );
+
+        if (trainingResult.success) {
+          this.logger.log(`✅ Claude training completed: ${trainingResult.trainingSummary.substring(0, 100)}...`);
+        } else {
+          this.logger.warn(`⚠️ Claude training failed but continuing with regular processing`);
+        }
+      } catch (trainingError) {
+        this.logger.error(`❌ Claude training error (continuing anyway):`, trainingError);
+        // Don't fail the entire process if training fails
+      }
+
+      // STEP 2: Generate chunks for vector search
+      this.logger.log(`📚 Step 2: Creating vector embeddings...`);
+
+      // Check if this is a PDF to use evidence-based chunking
+      const isPDF = fileName?.toLowerCase().endsWith('.pdf');
+      let chunks: any[];
+
+      if (isPDF) {
+        this.logger.log(`📖 Using evidence-based chunking for PDF...`);
+        const evidenceChunks = await this.evidenceChunkService.createEvidenceChunks(content, fileName || 'document.pdf');
+        chunks = evidenceChunks.map((ec: any) => ({
+          text: ec.searchText, // Embed the search text (disease + symptoms)
+          metadata: {
+            type: ec.type, // 'evidence'
+            disease: ec.disease,
+            chapterNumber: ec.chapterNumber,
+            chapterName: ec.chapterName,
+            sourceFile: ec.sourceFile,
+            chunkIndex: ec.chunkIndex,
+            evidenceText: ec.evidenceText, // Store evidence for retrieval
+            evidenceCount: ec.structuredEvidence?.length || 0,
+          }
+        }));
+        this.logger.log(`✅ Created ${chunks.length} evidence-based chunks`);
+      } else {
+        chunks = this.createChunks(content);
+      }
+
       // Generate embeddings for each chunk
       const processedChunks: DocumentChunk[] = [];
-      
+
       for (const [index, chunk] of chunks.entries()) {
         const embedding = await this.searchService.generateEmbedding(chunk.text);
-        
+
         const documentChunk: DocumentChunk = {
           id: `${documentId}-${index}`,
           documentId,
@@ -203,9 +266,9 @@ export class DocumentsService {
           embedding,
           metadata: chunk.metadata,
         };
-        
+
         processedChunks.push(documentChunk);
-        
+
         // Index in OpenSearch (don't fail if indexing fails)
         try {
           await this.searchService.indexDocument({
@@ -226,18 +289,24 @@ export class DocumentsService {
       // Store chunks in database for retrieval
       await this.storeDocumentChunks(documentId, processedChunks);
 
-      // Update document status without full content
+      // Update document status with training info
       await this.databaseService.updateDocumentStatus(documentId, 'processed', {
         totalChunks: chunks.length,
         processedAt: Date.now(),
         processedAtISO: new Date().toISOString(),
-        contentPreview: content.substring(0, 1000), // Store preview only
+        contentPreview: content.substring(0, 1000),
+        claudeTrained: trainingResult?.success || false,
+        trainingStatus: trainingResult?.success ? 'trained' : 'training-failed',
+        trainingSummary: trainingResult?.trainingSummary,
       });
+
+      this.logger.log(`✅ Document processing completed: ${chunks.length} chunks + Claude training`);
 
       return {
         documentId,
         chunksCreated: chunks.length,
         status: 'processed',
+        claudeTrained: trainingResult?.success,
       };
     } catch (error) {
       await this.databaseService.updateDocumentStatus(documentId, 'failed', {

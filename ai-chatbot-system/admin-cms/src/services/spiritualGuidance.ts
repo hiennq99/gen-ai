@@ -616,13 +616,31 @@ export const spiritualGuidanceService = {
   }> {
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('title', file.name);
 
-    const response = await api.post('/admin/spiritual-guidance/documents/upload-pdf', formData, {
+    // Use new endpoint with Claude Training integration
+    const response = await api.post('/documents/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
     });
-    return response.data;
+
+    // Transform response to match expected format
+    return {
+      success: true,
+      data: {
+        extractedText: response.data.content || '',
+        generatedQAPairs: response.data.metadata?.totalChunks || 0,
+        stats: {
+          totalExamples: response.data.metadata?.totalChunks || 0,
+          byCategory: {},
+          byEmotionalState: {},
+        },
+      },
+      message: response.data.metadata?.claudeTrained
+        ? '✅ Document uploaded & Claude trained successfully!'
+        : '✅ Document uploaded successfully!',
+    };
   }
 };
 

@@ -123,17 +123,24 @@ const VectorDatabaseManager: React.FC = () => {
 
     try {
       setLoading(true);
+      setMessage({ type: 'success', text: '🎓 Training Claude AI on document content...' });
+
       const formData = new FormData();
       formData.append('file', uploadFile);
+      formData.append('title', uploadFile.name);
 
-      const response = await fetch(`${API_BASE}/documents/upload-pdf`, {
+      // Use the new endpoint with Claude Training integration
+      const response = await fetch('/api/v1/documents/upload', {
         method: 'POST',
         body: formData,
       });
 
       const data = await response.json();
-      if (data.success) {
-        setMessage({ type: 'success', text: data.message });
+      if (data.id || data.success !== false) {
+        setMessage({
+          type: 'success',
+          text: `✅ Document uploaded successfully! ${data.metadata?.claudeTrained ? '🎓 Claude trained on content' : 'Processing...'}`
+        });
         setUploadFile(null);
         loadStats();
         loadDocuments();
@@ -141,7 +148,7 @@ const VectorDatabaseManager: React.FC = () => {
         setMessage({ type: 'error', text: 'Upload failed' });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Upload failed' });
+      setMessage({ type: 'error', text: 'Upload failed: ' + (error as Error).message });
     } finally {
       setLoading(false);
     }
@@ -272,10 +279,18 @@ const VectorDatabaseManager: React.FC = () => {
             disabled={!uploadFile || loading}
             className="w-full"
           >
-            {loading ? 'Uploading...' : 'Upload & Process PDF'}
+            {loading ? '🎓 Training Claude AI...' : 'Upload & Train AI'}
           </Button>
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+            <p className="text-sm text-blue-800 font-medium mb-1">
+              🎓 AI Training Feature
+            </p>
+            <p className="text-xs text-blue-700">
+              Claude AI will read and memorize your PDF content, enabling it to recall and cite information when answering questions.
+            </p>
+          </div>
           <p className="text-sm text-gray-600">
-            PDF will be processed, chunked, and stored as vectors for semantic search.
+            PDF will be: ① Trained with Claude AI ② Chunked ③ Stored as vectors for semantic search
           </p>
         </CardContent>
       </Card>
