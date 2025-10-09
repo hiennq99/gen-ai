@@ -203,6 +203,16 @@ export default function MessageItem({ message }: MessageItemProps) {
     console.log('💚 Message has emotionAnalysis:', message.emotionAnalysis);
   }
 
+  // Debug recommendations
+  if (!isUser && message.metadata) {
+    console.log('🔍 Recommendations Debug:', {
+      hasMetadata: !!message.metadata,
+      hasRecommendations: !!message.metadata.recommendations,
+      count: message.metadata.recommendations?.length || 0,
+      recommendations: message.metadata.recommendations
+    });
+  }
+
   return (
     <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
       {!isUser && (

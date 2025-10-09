@@ -45,8 +45,15 @@ export class ConversationsService {
       return [];
     }
 
+    // Sort by timestamp (descending - newest first)
+    const sortedHistory = history.sort((a: any, b: any) => {
+      const timeA = new Date(a.startedAt || a.createdAtISO || a.createdAt).getTime();
+      const timeB = new Date(b.startedAt || b.createdAtISO || b.createdAt).getTime();
+      return timeB - timeA; // Descending: newest first
+    });
+
     // Generate title from first user message
-    const firstUserMessage = history[0]?.userMessage;
+    const firstUserMessage = sortedHistory[0]?.userMessage;
     const title = firstUserMessage ?
       (firstUserMessage.length > 50 ?
         firstUserMessage.substring(0, 50) + '...' :
@@ -56,7 +63,7 @@ export class ConversationsService {
     // Return history with title and transformed messages
     return {
       title,
-      messages: this.buildMessages(history),
+      messages: this.buildMessages(sortedHistory),
     };
   }
 
@@ -173,6 +180,14 @@ export class ConversationsService {
         confidence: conv.confidence,
         media: conv.metadata?.media || [], // Include media from metadata
         emotionTags: conv.emotionTags,
+        metadata: conv.metadata ? {
+          ...conv.metadata,
+          recommendations: conv.metadata.recommendations || [],
+          documents: conv.metadata.documents || [],
+          emotionAnalysis: conv.metadata.emotionAnalysis,
+          emotionSummary: conv.metadata.emotionSummary,
+          responseStyleText: conv.metadata.responseStyleText,
+        } : undefined,
       },
     ]).flat();
   }

@@ -376,23 +376,6 @@ export class ChatService {
           },
         };
         
-        // Save conversation
-        await this.saveConversation({
-          messageId,
-          sessionId: request.sessionId,
-          userId: request.userId,
-          userMessage: request.message,
-          assistantMessage: formattedContent,
-          emotion: emotionAnalysis,
-          emotionTags,
-          processingTime: Date.now() - startTime,
-          metadata: {
-            mode: 'exact-match',
-            documentId: bestMatch.documentId,
-            media: dummyMedia, // Include media in metadata
-          },
-        });
-
         // Get recommendations based on query and emotion
         const recommendations = await this.recommendationService.getRecommendations({
           query: request.message,
@@ -405,6 +388,24 @@ export class ChatService {
         if (recommendations.length > 0) {
           response.metadata.recommendations = recommendations;
         }
+
+        // Save conversation WITH recommendations
+        await this.saveConversation({
+          messageId,
+          sessionId: request.sessionId,
+          userId: request.userId,
+          userMessage: request.message,
+          assistantMessage: formattedContent,
+          emotion: emotionAnalysis,
+          emotionTags,
+          processingTime: Date.now() - startTime,
+          metadata: {
+            mode: 'exact-match',
+            documentId: bestMatch.documentId,
+            media: dummyMedia,
+            recommendations: recommendations.length > 0 ? recommendations : undefined, // Include recommendations
+          },
+        });
 
         return response;
       }
@@ -484,6 +485,19 @@ export class ChatService {
           },
         };
 
+        // Get recommendations for AI interpretation mode
+        const recommendations = await this.recommendationService.getRecommendations({
+          query: request.message,
+          emotion: emotionAnalysis.primaryEmotion,
+          keywords: emotionAnalysis.keywords,
+          limit: 5,
+        });
+
+        if (recommendations.length > 0) {
+          response.metadata.recommendations = recommendations;
+        }
+
+        // Save conversation WITH recommendations
         await this.saveConversation({
           messageId,
           sessionId: request.sessionId,
@@ -496,20 +510,9 @@ export class ChatService {
           metadata: {
             mode: 'ai-interpretation',
             media: dummyMedia,
+            recommendations: recommendations.length > 0 ? recommendations : undefined, // Include recommendations
           },
         });
-
-        // Get recommendations for AI interpretation mode
-        const recommendations = await this.recommendationService.getRecommendations({
-          query: request.message,
-          emotion: emotionAnalysis.primaryEmotion,
-          keywords: emotionAnalysis.keywords,
-          limit: 5,
-        });
-
-        if (recommendations.length > 0) {
-          response.metadata.recommendations = recommendations;
-        }
 
       return response;
     } catch (error) {
