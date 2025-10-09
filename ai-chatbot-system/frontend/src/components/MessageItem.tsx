@@ -437,7 +437,7 @@ export default function MessageItem({ message }: MessageItemProps) {
                       <div className="font-semibold text-gray-800">{doc.title}</div>
 
                       {/* Q&A Match */}
-                      {message.metadata.contextInfo?.qaMatch && doc.source && (
+                      {message.metadata?.contextInfo?.qaMatch && doc.source && (
                         <div className="text-xs text-gray-600 bg-blue-50 px-2 py-1 rounded">
                           <span className="font-medium">📝 Question:</span> {doc.source}
                         </div>
@@ -461,7 +461,7 @@ export default function MessageItem({ message }: MessageItemProps) {
                       {/* Excerpt */}
                       {doc.excerpt && (
                         <div className="text-xs text-gray-500 italic border-l-2 border-gray-300 pl-2 mt-1">
-                          "{doc.excerpt}"
+                          &ldquo;{doc.excerpt}&rdquo;
                         </div>
                       )}
 
