@@ -65,10 +65,11 @@ interface ChatStore {
   currentSession: ChatSession | null;
   isLoading: boolean;
   isTyping: boolean;
-  
+
   // Actions
   createSession: (title?: string) => ChatSession;
   setCurrentSession: (sessionId: string) => void;
+  updateSessionId: (oldSessionId: string, newSessionId: string) => void;
   addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => void;
   updateMessage: (messageId: string, content: string) => void;
   deleteSession: (sessionId: string) => void;
@@ -114,6 +115,30 @@ export const useChatStore = create<ChatStore>()(
             currentSession: session,
           });
         }
+      },
+
+      updateSessionId: (oldSessionId: string, newSessionId: string) => {
+        set((state) => {
+          // Update session ID in sessions array
+          const updatedSessions = state.sessions.map((s) =>
+            s.id === oldSessionId ? { ...s, id: newSessionId } : s
+          );
+
+          // Update current session if it's the one being changed
+          const updatedCurrentSession = state.currentSessionId === oldSessionId && state.currentSession
+            ? { ...state.currentSession, id: newSessionId }
+            : state.currentSession;
+
+          const updatedCurrentSessionId = state.currentSessionId === oldSessionId
+            ? newSessionId
+            : state.currentSessionId;
+
+          return {
+            sessions: updatedSessions,
+            currentSession: updatedCurrentSession,
+            currentSessionId: updatedCurrentSessionId,
+          };
+        });
       },
 
       addMessage: (message) => {
@@ -221,72 +246,50 @@ export const useChatStore = create<ChatStore>()(
       fetchSessions: async (userId?: string) => {
         try {
           set({ isLoading: true });
+          console.log('📡 Fetching conversations from backend...');
           const conversations = await conversationService.getAllConversations({ userId });
-          
+          console.log(`✅ Received ${conversations?.length || 0} conversations from backend`);
+
           // Check if conversations is an array
           if (!Array.isArray(conversations)) {
             console.warn('No conversations found or invalid response');
             set({ sessions: [], isLoading: false });
             return;
           }
-          
-          // Transform backend conversations to local session format
+
+          // Backend already groups by session and sorts correctly
+          // Just transform to local format
           const sessions: ChatSession[] = conversations
-            .filter((conv: any) => conv && conv.sessionId) // Filter out invalid entries
+            .filter((conv: any) => conv && conv.sessionId)
             .map((conv: any) => {
-              // Backend returns 'startedAt' not 'createdAt'
-              const createdAt = conv.startedAt ? new Date(conv.startedAt) :
-                               (conv.createdAt ? new Date(conv.createdAt) : new Date());
-              const updatedAt = conv.updatedAt ? new Date(conv.updatedAt) : createdAt;
-              
+              const startedAt = conv.startedAt ? new Date(conv.startedAt) : new Date();
+
+              // Backend already provides messages array
+              const messages: Message[] = (conv.messages || []).map((msg: any) => ({
+                id: uuidv4(),
+                role: msg.role as 'user' | 'assistant',
+                content: msg.content || '',
+                timestamp: new Date(msg.timestamp),
+                emotion: msg.emotion,
+                emotionAnalysis: msg.emotionAnalysis,
+                emotionTags: msg.emotionTags,
+                confidence: msg.confidence,
+                media: msg.media || [],
+                metadata: msg.metadata,
+              }));
+
               return {
                 id: conv.sessionId,
-                title: conv.title || (conv.userMessage ?
-                  (conv.userMessage.length > 50 ?
-                    conv.userMessage.substring(0, 50) + '...' :
-                    conv.userMessage) :
-                  'Chat Session'),
-                messages: [
-                  {
-                    id: conv.messageId || uuidv4(),
-                    role: 'user' as const,
-                    content: conv.userMessage || '',
-                    timestamp: createdAt,
-                    emotion: conv.emotion?.primaryEmotion,
-                    emotionAnalysis: conv.emotion,
-                    emotionTags: conv.emotionTags,
-                    confidence: conv.emotion?.confidence,
-                  },
-                  {
-                    id: uuidv4(),
-                    role: 'assistant' as const,
-                    content: conv.assistantMessage || '',
-                    timestamp: createdAt,
-                    emotionTags: conv.emotionTags,
-                    metadata: conv.metadata,
-                  }
-                ],
-                createdAt,
-                updatedAt,
+                title: conv.title || 'Chat Session',
+                messages,
+                createdAt: startedAt,
+                updatedAt: startedAt,
               };
             });
 
-          // Group messages by session
-          const sessionMap = new Map<string, ChatSession>();
-          sessions.forEach(session => {
-            if (sessionMap.has(session.id)) {
-              const existing = sessionMap.get(session.id)!;
-              existing.messages.push(...session.messages);
-              existing.updatedAt = session.updatedAt > existing.updatedAt ? session.updatedAt : existing.updatedAt;
-            } else {
-              sessionMap.set(session.id, session);
-            }
-          });
-
-          const groupedSessions = Array.from(sessionMap.values())
-            .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-
-          set({ sessions: groupedSessions, isLoading: false });
+          // Backend already sorted by startedAt desc, keep that order
+          console.log(`💾 Stored ${sessions.length} sessions in state`);
+          set({ sessions, isLoading: false });
         } catch (error) {
           console.error('Error fetching sessions:', error);
           set({ isLoading: false });

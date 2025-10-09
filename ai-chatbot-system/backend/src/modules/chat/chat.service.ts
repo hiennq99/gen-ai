@@ -733,7 +733,9 @@ export class ChatService {
 
   private async saveConversation(data: any): Promise<void> {
     try {
+      this.logger.log(`💾 Saving conversation for session: ${data.sessionId}`);
       await this.databaseService.saveConversation(data);
+      this.logger.log(`✅ Conversation saved successfully for session: ${data.sessionId}`);
     } catch (error: any) {
       this.logger.error('Error saving conversation:', error.message || error);
       // Don't throw, just log the error

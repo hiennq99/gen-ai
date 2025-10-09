@@ -11,7 +11,8 @@ export class ConversationsService {
 
   async getConversations(filters?: any) {
     const conversations = await this.databaseService.getConversationHistory('*');
-    
+    console.log(`📊 getConversations: Retrieved ${conversations?.length || 0} raw conversations from database`);
+
     let filtered = conversations;
     
     // Apply filters
@@ -35,7 +36,9 @@ export class ConversationsService {
     }
 
     // Transform data for frontend
-    return this.transformConversations(filtered);
+    const transformed = this.transformConversations(filtered);
+    console.log(`📊 getConversations: Returning ${transformed?.length || 0} transformed conversations`);
+    return transformed;
   }
 
   async getConversation(sessionId: string) {
@@ -45,14 +48,14 @@ export class ConversationsService {
       return [];
     }
 
-    // Sort by timestamp (descending - newest first)
+    // Sort by timestamp (ascending - oldest first)
     const sortedHistory = history.sort((a: any, b: any) => {
       const timeA = new Date(a.startedAt || a.createdAtISO || a.createdAt).getTime();
       const timeB = new Date(b.startedAt || b.createdAtISO || b.createdAt).getTime();
-      return timeB - timeA; // Descending: newest first
+      return timeA - timeB; // Ascending: oldest first
     });
 
-    // Generate title from first user message
+    // Generate title from first (oldest) user message
     const firstUserMessage = sortedHistory[0]?.userMessage;
     const title = firstUserMessage ?
       (firstUserMessage.length > 50 ?
@@ -96,6 +99,7 @@ export class ConversationsService {
   }
 
   private transformConversations(conversations: any[]) {
+    console.log(`🔄 transformConversations: Input ${conversations.length} conversations`);
     // Group by session
     const sessionMap = new Map<string, any[]>();
 
@@ -106,6 +110,7 @@ export class ConversationsService {
       }
       sessionMap.get(sessionId)?.push(conv);
     });
+    console.log(`🔄 transformConversations: Grouped into ${sessionMap.size} sessions`);
 
     // Transform to frontend format
     return Array.from(sessionMap.entries()).map(([sessionId, convs]) => {

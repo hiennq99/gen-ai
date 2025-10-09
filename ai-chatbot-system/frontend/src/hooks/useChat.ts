@@ -8,13 +8,15 @@ import toast from 'react-hot-toast';
 
 export function useChat() {
   const [isConnected, setIsConnected] = useState(false);
-  const { 
-    currentSession, 
-    addMessage, 
-    updateMessage, 
-    setLoading, 
+  const {
+    currentSession,
+    addMessage,
+    updateMessage,
+    setLoading,
     setTyping,
-    createSession 
+    createSession,
+    fetchSessions,
+    updateSessionId
   } = useChatStore();
 
   const { socket, connected } = useWebSocket();
@@ -30,6 +32,9 @@ export function useChat() {
       if (!sessionId) {
         const newSession = createSession();
         sessionId = newSession.id;
+        console.log('🆕 Created new session:', sessionId);
+      } else {
+        console.log('📌 Using existing session:', sessionId);
       }
 
       // Add user message
@@ -81,6 +86,7 @@ export function useChat() {
                 metadata: response.metadata,
               });
               console.log('✅ Assistant message added to store (fallback)');
+              setTimeout(() => fetchSessions(), 500);
             } catch (fallbackError) {
               console.error('❌ HTTP fallback failed:', fallbackError);
               toast.error('Failed to get response');
@@ -119,6 +125,7 @@ export function useChat() {
               media: response.media,
               metadata: response.metadata,
             });
+            setTimeout(() => fetchSessions(), 500);
             setTyping(false);
             setLoading(false);
           });
@@ -147,6 +154,7 @@ export function useChat() {
                 metadata: response.metadata,
               });
               console.log('✅ Assistant message added to store (error fallback)');
+              setTimeout(() => fetchSessions(), 500);
             } catch (fallbackError) {
               console.error('❌ HTTP error fallback failed:', fallbackError);
               toast.error('Failed to get response');
@@ -174,6 +182,13 @@ export function useChat() {
         });
 
         console.log('📩 HTTP Response received:', response);
+
+        // Update sessionId if backend provided a different one
+        if (response.metadata?.sessionId && response.metadata.sessionId !== sessionId) {
+          console.log(`🔄 Updating sessionId from ${sessionId} to ${response.metadata.sessionId}`);
+          updateSessionId(sessionId, response.metadata.sessionId);
+        }
+
         addMessage({
           role: 'assistant',
           content: response.content,
@@ -183,6 +198,13 @@ export function useChat() {
           metadata: response.metadata,
         });
         console.log('✅ Assistant message added to store');
+
+        // Refresh conversations list to show new conversation
+        // Add small delay to ensure backend has saved the conversation
+        setTimeout(() => {
+          console.log('🔄 Fetching sessions after message sent...');
+          fetchSessions();
+        }, 500);
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -191,7 +213,7 @@ export function useChat() {
       setLoading(false);
       setTyping(false);
     }
-  }, [currentSession, socket, connected, addMessage, setLoading, setTyping, createSession]);
+  }, [currentSession, socket, connected, addMessage, setLoading, setTyping, createSession, fetchSessions, updateSessionId]);
 
   const streamMessage = useCallback(async (content: string) => {
     if (!socket || !connected) {

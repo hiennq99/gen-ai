@@ -25,8 +25,16 @@ export const conversationService = {
           if (value) params.append(key, value);
         });
       }
-      
-      const response = await api.get(`/conversations?${params.toString()}`);
+
+      // Add cache-busting timestamp
+      params.append('_t', Date.now().toString());
+
+      const response = await api.get(`/conversations?${params.toString()}`, {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+        },
+      });
       return response.data || [];
     } catch (error) {
       console.error('Error fetching conversations:', error);
