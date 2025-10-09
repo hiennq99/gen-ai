@@ -11,6 +11,7 @@ import { CacheModule } from '../cache/cache.module';
 import { PersonalityModule } from '../personality/personality.module';
 import { MediaModule } from '../media/media.module';
 import { SpiritualGuidanceModule } from '../spiritual-guidance/spiritual-guidance.module';
+import { RecommendationModule } from '../recommendations/recommendation.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { SpiritualGuidanceModule } from '../spiritual-guidance/spiritual-guidanc
     PersonalityModule,
     MediaModule,
     SpiritualGuidanceModule,
+    RecommendationModule,
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway],

@@ -481,6 +481,81 @@ export default function MessageItem({ message }: MessageItemProps) {
           </div>
         )}
 
+        {/* Recommendations */}
+        {!isUser && message.metadata?.recommendations && message.metadata.recommendations.length > 0 && (
+          <div className="mt-2 px-3 py-2 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg text-xs">
+            <div className="font-semibold text-gray-700 mb-2 flex items-center gap-1">
+              <span className="text-purple-600">💡</span> Related Resources
+            </div>
+            <div className="space-y-2">
+              {message.metadata.recommendations.map((rec: any, idx: number) => (
+                <div key={idx} className="bg-white rounded p-2 border border-gray-200 hover:shadow-md transition-shadow">
+                  <div className="flex items-start gap-2">
+                    {/* Icon based on type */}
+                    <span className="flex-shrink-0 text-lg">
+                      {rec.type === 'video' && '🎥'}
+                      {rec.type === 'article' && '📄'}
+                      {rec.type === 'past_answer' && '💬'}
+                      {rec.type === 'document' && '📚'}
+                    </span>
+
+                    <div className="flex-1">
+                      {/* Title with link */}
+                      {rec.url ? (
+                        <a
+                          href={rec.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-semibold text-blue-600 hover:text-blue-800 hover:underline"
+                        >
+                          {rec.title}
+                        </a>
+                      ) : (
+                        <div className="font-semibold text-gray-800">{rec.title}</div>
+                      )}
+
+                      {/* Description */}
+                      {rec.description && (
+                        <div className="text-xs text-gray-600 mt-1">{rec.description}</div>
+                      )}
+
+                      {/* Metadata */}
+                      <div className="flex items-center gap-2 mt-1">
+                        {rec.source && (
+                          <span className="text-xs text-gray-500">📍 {rec.source}</span>
+                        )}
+                        <span className="text-xs font-medium text-purple-700">
+                          ✓ {rec.relevanceScore.toFixed(0)}% relevant
+                        </span>
+                        {rec.type && (
+                          <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded capitalize">
+                            {rec.type.replace('_', ' ')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Thumbnail for videos */}
+                    {rec.thumbnail && (
+                      <img
+                        src={rec.thumbnail}
+                        alt={rec.title}
+                        className="w-16 h-12 rounded object-cover flex-shrink-0"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 text-xs text-gray-500 text-center">
+              💡 These resources are selected based on your query and emotional context
+            </div>
+          </div>
+        )}
+
         {/* Emotion Analysis Details */}
         {message.emotionAnalysis && (
           <div className="mt-2 px-3 py-2 bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg text-xs">

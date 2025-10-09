@@ -103,7 +103,7 @@ export class RecommendationService {
     const { query, emotion, keywords, limit = 5 } = request;
     const recommendations: Recommendation[] = [];
 
-    this.logger.log(`<� Getting recommendations for: "${query}" with emotion: ${emotion}`);
+    this.logger.log(`<� Getting recommendations for: "${query}" with emotion: ${emotion}`);
 
     try {
       // 1. Get related videos
@@ -267,7 +267,7 @@ export class RecommendationService {
             relevanceScore: Math.min(score, 100),
             emotion: conv.emotion?.primaryEmotion,
             source: 'Past Conversation',
-          };
+          } as Recommendation;
         })
         .filter((rec): rec is Recommendation => rec !== null)
         .sort((a, b) => b.relevanceScore - a.relevanceScore)
@@ -291,15 +291,33 @@ export class RecommendationService {
 
       return searchResults
         .filter((doc: any) => doc.score > 0.3)
-        .map((doc: any) => ({
-          type: 'document' as const,
-          title: doc.metadata?.documentName || doc.title || 'Related Document',
-          description: (doc.content || doc.text || '').substring(0, 150) + '...',
-          relevanceScore: Math.min(doc.score * 100, 100),
-          emotion,
-          tags: doc.metadata?.tags || [],
-          source: doc.metadata?.documentType || 'Document',
-        }));
+        .map((doc: any) => {
+          // Calculate relevance score based on document match quality
+          // OpenSearch scores can range from 0 to infinity (based on TF-IDF)
+          // Normalize OpenSearch score to 0-100 range
+          // Common ranges: 0-1 (poor), 1-5 (medium), 5-10 (good), 10+ (excellent)
+          let relevanceScore = 0;
+
+          if (doc.score >= 10) {
+            relevanceScore = 95 + Math.min((doc.score - 10) / 10, 1) * 5; // 10+ → 95-100
+          } else if (doc.score >= 5) {
+            relevanceScore = 80 + ((doc.score - 5) / 5) * 15; // 5-10 → 80-95
+          } else if (doc.score >= 1) {
+            relevanceScore = 50 + ((doc.score - 1) / 4) * 30; // 1-5 → 50-80
+          } else {
+            relevanceScore = doc.score * 50; // 0-1 → 0-50
+          }
+
+          return {
+            type: 'document' as const,
+            title: doc.metadata?.documentName || doc.title || 'Related Document',
+            description: (doc.content || doc.text || '').substring(0, 150) + '...',
+            relevanceScore: Math.round(Math.min(relevanceScore, 100)),
+            emotion,
+            tags: doc.metadata?.tags || [],
+            source: doc.metadata?.documentType || 'Document',
+          };
+        });
     } catch (error) {
       this.logger.error('Error getting related documents:', error);
       return [];

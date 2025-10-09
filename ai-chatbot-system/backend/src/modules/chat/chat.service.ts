@@ -8,6 +8,7 @@ import { CacheService } from '../cache/cache.service';
 import { PersonalityService } from '../personality/personality.service';
 import { MediaService } from '../media/media.service';
 import { SpiritualGuidanceService } from '../spiritual-guidance/spiritual-guidance.service';
+import { RecommendationService } from '../recommendations/recommendation.service';
 import type { ConversationContext } from '../personality/personality.service';
 import { ChatRequest, ChatResponse, ChatSession } from './interfaces/chat.interface';
 import { v4 as uuidv4 } from 'uuid';
@@ -28,6 +29,7 @@ export class ChatService {
     private readonly personalityService: PersonalityService,
     private readonly mediaService: MediaService,
     private readonly spiritualGuidanceService: SpiritualGuidanceService,
+    private readonly recommendationService: RecommendationService,
   ) {}
 
   /**
@@ -169,12 +171,12 @@ export class ChatService {
       }
 
       // Decision logic:
-      // - Always require ≥95% confidence to use document (for both first and subsequent messages)
+      // - Always require ≥80% confidence to use document (for both first and subsequent messages)
       // - If duplicate detected: force AI interpretation for variety
       // - Otherwise use AI interpretation with conversation context
-      const useDocumentMode = bestDocument !== null && documentConfidence >= 95 && !isDuplicateResponse;
+      const useDocumentMode = bestDocument !== null && documentConfidence >= 80 && !isDuplicateResponse;
 
-      this.logger.log(`📊 Mode Decision: isFirstMessage=${isFirstMessage}, documentScore=${documentScore.toFixed(3)}, confidence=${documentConfidence.toFixed(1)}%, useDocument=${useDocumentMode} (requires ≥95%), isDuplicate=${isDuplicateResponse}`);
+      this.logger.log(`📊 Mode Decision: isFirstMessage=${isFirstMessage}, documentScore=${documentScore.toFixed(3)}, confidence=${documentConfidence.toFixed(1)}%, useDocument=${useDocumentMode} (requires ≥80%), isDuplicate=${isDuplicateResponse}`);
 
       if (useDocumentMode) {
         // Return the exact content from the best matching training document
@@ -390,7 +392,20 @@ export class ChatService {
             media: dummyMedia, // Include media in metadata
           },
         });
-        
+
+        // Get recommendations based on query and emotion
+        const recommendations = await this.recommendationService.getRecommendations({
+          query: request.message,
+          emotion: emotionAnalysis.primaryEmotion,
+          keywords: emotionAnalysis.keywords,
+          limit: 5,
+        });
+
+        // Add recommendations to metadata
+        if (recommendations.length > 0) {
+          response.metadata.recommendations = recommendations;
+        }
+
         return response;
       }
 
@@ -483,6 +498,18 @@ export class ChatService {
             media: dummyMedia,
           },
         });
+
+        // Get recommendations for AI interpretation mode
+        const recommendations = await this.recommendationService.getRecommendations({
+          query: request.message,
+          emotion: emotionAnalysis.primaryEmotion,
+          keywords: emotionAnalysis.keywords,
+          limit: 5,
+        });
+
+        if (recommendations.length > 0) {
+          response.metadata.recommendations = recommendations;
+        }
 
       return response;
     } catch (error) {
