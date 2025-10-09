@@ -122,6 +122,12 @@ export class ChatService {
 
       // Get conversation history early to check if it's first message
       const conversationHistory = await this.getConversationHistory(sessionId);
+
+      // Check for duplicate responses in this conversation
+      const isDuplicateResponse = await this.checkForDuplicateResponse(request.message, conversationHistory);
+      if (isDuplicateResponse) {
+        this.logger.log('🔄 Duplicate response detected, generating alternative response');
+      }
       
       // Search for relevant context - prioritize exact Q&A matches
       const searchResults = await this.searchService.searchDocuments({
@@ -164,10 +170,11 @@ export class ChatService {
 
       // Decision logic:
       // - Always require ≥95% confidence to use document (for both first and subsequent messages)
+      // - If duplicate detected: force AI interpretation for variety
       // - Otherwise use AI interpretation with conversation context
-      const useDocumentMode = bestDocument !== null && documentConfidence >= 95;
+      const useDocumentMode = bestDocument !== null && documentConfidence >= 95 && !isDuplicateResponse;
 
-      this.logger.log(`📊 Mode Decision: isFirstMessage=${isFirstMessage}, documentScore=${documentScore.toFixed(3)}, confidence=${documentConfidence.toFixed(1)}%, useDocument=${useDocumentMode} (requires ≥95%)`);
+      this.logger.log(`📊 Mode Decision: isFirstMessage=${isFirstMessage}, documentScore=${documentScore.toFixed(3)}, confidence=${documentConfidence.toFixed(1)}%, useDocument=${useDocumentMode} (requires ≥95%), isDuplicate=${isDuplicateResponse}`);
 
       if (useDocumentMode) {
         // Return the exact content from the best matching training document
@@ -213,7 +220,10 @@ export class ChatService {
         );
 
         // Combine header with formatted answer
-        const formattedContent = `${emotionalHeader}\n\n${formattedAnswer}`;
+        let formattedContent = `${emotionalHeader}\n\n${formattedAnswer}`;
+
+        // Add source citation to the content (this will be set after sourceDisplay is determined)
+        let finalFormattedContent = formattedContent;
 
         // Use the confidence calculated earlier
         const confidencePercent = documentConfidence;
@@ -269,22 +279,52 @@ export class ChatService {
             chunkIndex: bestMatch.metadata?.chunkIndex,
             evidenceCount: bestMatch.metadata?.evidenceCount,
           };
-          sourceDisplay = `📖 Source: ${bestMatch.metadata?.sourceFile || 'PDF Document'}\n🏥 Topic: ${bestMatch.metadata?.disease || 'Spiritual Medicine'}`;
+          // Enhanced evidence citation with page information
+          const documentName = bestMatch.metadata?.sourceFile || 'PDF Document';
+          const pageNum = bestMatch.metadata?.pageNumber;
+          const disease = bestMatch.metadata?.disease || 'Spiritual Medicine';
+
+          sourceDisplay = `📄 **Source:** ${documentName}`;
+          if (pageNum) {
+            sourceDisplay += `\n📑 **Page:** ${pageNum}`;
+          }
+          sourceDisplay += `\n🏥 **Topic:** ${disease}`;
         } else {
-          // Other document types
+          // PDF or other document types with page information
+          const documentName = bestMatch.metadata?.documentName || bestMatch.title || 'Document';
+          const pageNum = bestMatch.metadata?.page;
+          const totalPages = bestMatch.metadata?.totalPages;
+
           sourceInfo = {
             type: 'document',
             source: 'Document',
             documentId: bestMatch.documentId,
             title: bestMatch.title,
+            documentName,
+            page: pageNum,
+            totalPages: totalPages,
+            documentType: bestMatch.metadata?.documentType,
           };
-          sourceDisplay = `📄 Source: ${bestMatch.title || 'Document'}`;
+
+          sourceDisplay = `📄 **Source:** ${documentName}`;
+          if (pageNum) {
+            sourceDisplay += `\n📑 **Page:** ${pageNum}`;
+            if (totalPages) {
+              sourceDisplay += ` of ${totalPages}`;
+            }
+          }
+          if (bestMatch.metadata?.documentType) {
+            sourceDisplay += `\n📋 **Type:** ${bestMatch.metadata.documentType.toUpperCase()}`;
+          }
         }
+
+        // Append citation to the content
+        finalFormattedContent = `${formattedContent}\n\n---\n\n${sourceDisplay}`;
 
         // Format as direct response
         const response: ChatResponse = {
           id: messageId,
-          content: formattedContent,
+          content: finalFormattedContent,
           media: dummyMedia,
           emotion: emotionAnalysis.primaryEmotion,
           emotionTags,
@@ -299,11 +339,15 @@ export class ChatService {
             documents: [{
               title: isQAMatch
                 ? (bestMatch.metadata?.question?.substring(0, 80) + '...' || 'Training Q&A')
-                : (bestMatch.title || bestMatch.metadata?.disease || 'Training Document'),
+                : (bestMatch.metadata?.documentName || bestMatch.title || bestMatch.metadata?.disease || 'Document'),
               relevanceScore: confidencePercent.toFixed(1) + '%',
               excerpt: rawAnswer.substring(0, 200) + (rawAnswer.length > 200 ? '...' : ''),
-              matchType: bestMatch.metadata?.type || 'qa_match',
+              matchType: bestMatch.metadata?.type || 'document_match',
               source: sourceInfo.source,
+              page: bestMatch.metadata?.page,
+              totalPages: bestMatch.metadata?.totalPages,
+              documentType: bestMatch.metadata?.documentType,
+              documentName: bestMatch.metadata?.documentName,
               ...sourceInfo,
             }],
             source: sourceInfo,
@@ -365,9 +409,13 @@ export class ChatService {
         }).filter(Boolean).join('\n');
 
         // Create context-aware prompt for AI
+        const duplicateInstruction = isDuplicateResponse
+          ? '\n\nIMPORTANT: The user has asked a similar question before. Provide a fresh perspective, different examples, or explore a new angle. Avoid repeating previous responses.'
+          : '';
+
         const contextualPrompt = conversationContext
-          ? `You are a helpful, empathetic AI assistant specialized in spiritual guidance and mental wellness. Respond naturally and conversationally.\n\nPrevious conversation:\n${conversationContext}\n\nUser's current question: ${request.message}\n\nProvide a helpful, warm, and supportive response:`
-          : `You are a helpful, empathetic AI assistant specialized in spiritual guidance and mental wellness. Respond naturally and conversationally.\n\nUser question: ${request.message}\n\nProvide a helpful, warm, and supportive response:`;
+          ? `You are a helpful, empathetic AI assistant specialized in spiritual guidance and mental wellness. Respond naturally and conversationally.${duplicateInstruction}\n\nPrevious conversation:\n${conversationContext}\n\nUser's current question: ${request.message}\n\nProvide a helpful, warm, and supportive response:`
+          : `You are a helpful, empathetic AI assistant specialized in spiritual guidance and mental wellness. Respond naturally and conversationally.${duplicateInstruction}\n\nUser question: ${request.message}\n\nProvide a helpful, warm, and supportive response:`;
 
         // Generate AI response using Bedrock
         const aiGeneratedResponse = await this.bedrockService.invokeModel({
@@ -392,7 +440,7 @@ export class ChatService {
         const dummyMedia = this.mediaService.generateDummyMedia(
           emotionAnalysis.primaryEmotion,
           request.message,
-          false
+          true
         );
 
         const response: ChatResponse = {
@@ -556,7 +604,7 @@ export class ChatService {
 
   private async getConversationHistory(sessionId: string): Promise<any[]> {
     if (!sessionId) return [];
-    
+
     try {
       return await this.databaseService.getConversationHistory(sessionId);
     } catch (error: any) {
@@ -564,6 +612,93 @@ export class ChatService {
       // Return empty array instead of throwing
       return [];
     }
+  }
+
+  /**
+   * Check if we've already provided a similar response in this conversation
+   */
+  private async checkForDuplicateResponse(currentMessage: string, conversationHistory: any[]): Promise<boolean> {
+    if (!conversationHistory || conversationHistory.length === 0) {
+      return false;
+    }
+
+    // Get recent assistant messages from the last 10 exchanges
+    const recentResponses = conversationHistory
+      .slice(-20) // Last 20 messages (10 exchanges)
+      .filter(msg => msg.assistantMessage)
+      .map(msg => msg.assistantMessage);
+
+    if (recentResponses.length === 0) {
+      return false;
+    }
+
+    // Check if current message is very similar to recent user messages
+    const recentUserMessages = conversationHistory
+      .slice(-10) // Last 10 messages
+      .filter(msg => msg.userMessage)
+      .map(msg => msg.userMessage);
+
+    for (const previousMessage of recentUserMessages) {
+      if (this.areSimilarMessages(currentMessage, previousMessage)) {
+        this.logger.log(`🔍 Similar message detected: "${currentMessage.substring(0, 50)}..." vs "${previousMessage.substring(0, 50)}..."`);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if two messages are similar enough to be considered duplicates
+   */
+  private areSimilarMessages(message1: string, message2: string): boolean {
+    if (!message1 || !message2) return false;
+
+    // Normalize messages for comparison
+    const normalize = (text: string) =>
+      text.toLowerCase()
+          .replace(/[^\w\s]/g, '') // Remove punctuation
+          .replace(/\s+/g, ' ')    // Normalize whitespace
+          .trim();
+
+    const normalized1 = normalize(message1);
+    const normalized2 = normalize(message2);
+
+    // Exact match after normalization
+    if (normalized1 === normalized2) {
+      return true;
+    }
+
+    // Check if one message contains the other (for longer vs shorter versions)
+    if (normalized1.length > 20 && normalized2.length > 20) {
+      const shorter = normalized1.length < normalized2.length ? normalized1 : normalized2;
+      const longer = normalized1.length >= normalized2.length ? normalized1 : normalized2;
+
+      if (longer.includes(shorter) && shorter.length / longer.length > 0.8) {
+        return true;
+      }
+    }
+
+    // Calculate similarity ratio for substantial messages
+    if (normalized1.length > 30 && normalized2.length > 30) {
+      const similarity = this.calculateSimilarity(normalized1, normalized2);
+      return similarity > 0.85; // 85% similarity threshold
+    }
+
+    return false;
+  }
+
+  /**
+   * Calculate text similarity using simple word overlap
+   */
+  private calculateSimilarity(text1: string, text2: string): number {
+    const words1 = new Set(text1.split(' ').filter(w => w.length > 3));
+    const words2 = new Set(text2.split(' ').filter(w => w.length > 3));
+
+    const intersection = new Set([...words1].filter(x => words2.has(x)));
+    const union = new Set([...words1, ...words2]);
+
+    return union.size > 0 ? intersection.size / union.size : 0;
   }
 
   private async saveConversation(data: any): Promise<void> {

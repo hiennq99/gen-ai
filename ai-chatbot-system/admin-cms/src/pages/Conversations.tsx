@@ -214,14 +214,157 @@ export default function Conversations() {
                 >
                   <Card size="small">
                     <Space direction="vertical" style={{ width: '100%' }}>
-                      <Space>
+                      <Space wrap>
                         <Text strong>{msg.role === 'user' ? 'User' : 'Assistant'}</Text>
                         <Text type="secondary">{new Date(msg.timestamp).toLocaleTimeString()}</Text>
                         {msg.emotion && (
-                          <Tag color="blue">{msg.emotion}</Tag>
+                          <Tag color="blue">
+                            😊 Emotion: <strong>{msg.emotion}</strong>
+                          </Tag>
                         )}
                       </Space>
-                      <Paragraph>{msg.content}</Paragraph>
+
+                      {/* Emotion Analysis Details */}
+                      {msg.emotionAnalysis && (
+                        <Card
+                          size="small"
+                          style={{
+                            background: 'linear-gradient(to right, #eff6ff, #f5f3ff)',
+                            borderLeft: '3px solid #3b82f6',
+                            marginTop: 8,
+                            marginBottom: 8
+                          }}
+                        >
+                          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                            <Text strong style={{ color: '#3b82f6' }}>📊 Emotion Analysis</Text>
+                            <Space wrap size="small">
+                              <Text>Primary emotion:</Text>
+                              <Tag color="blue" style={{ fontWeight: 600, textTransform: 'capitalize' }}>
+                                {msg.emotionAnalysis.primaryEmotion}
+                              </Tag>
+                            </Space>
+                            {msg.emotionAnalysis.intensity && (
+                              <Space wrap size="small">
+                                <Text>Intensity:</Text>
+                                <Tag
+                                  color={
+                                    msg.emotionAnalysis.intensity === 'high' ? 'red' :
+                                    msg.emotionAnalysis.intensity === 'medium' ? 'orange' :
+                                    'green'
+                                  }
+                                  style={{ fontWeight: 600, textTransform: 'capitalize' }}
+                                >
+                                  {msg.emotionAnalysis.intensity}
+                                </Tag>
+                              </Space>
+                            )}
+                            {msg.emotionAnalysis.confidence && (
+                              <Space wrap size="small">
+                                <Text>Confidence:</Text>
+                                <Tag color="purple" style={{ fontWeight: 600 }}>
+                                  {msg.emotionAnalysis.confidence}%
+                                </Tag>
+                              </Space>
+                            )}
+                            {msg.emotionAnalysis.aiEnhanced && (
+                              <Tag color="magenta" style={{ fontWeight: 600 }}>
+                                ✨ AI Enhanced
+                              </Tag>
+                            )}
+                            {msg.emotionAnalysis.secondaryEmotions && msg.emotionAnalysis.secondaryEmotions.length > 0 && (
+                              <div>
+                                <Text style={{ marginRight: 8 }}>Secondary:</Text>
+                                <Space wrap size="small">
+                                  {msg.emotionAnalysis.secondaryEmotions.map((emotion: string, idx: number) => (
+                                    <Tag key={idx} style={{ textTransform: 'capitalize' }}>
+                                      {emotion}
+                                    </Tag>
+                                  ))}
+                                </Space>
+                              </div>
+                            )}
+                          </Space>
+                        </Card>
+                      )}
+
+                      {/* Source Citations */}
+                      {msg.metadata?.documents && msg.metadata.documents.length > 0 && (
+                        <Card
+                          size="small"
+                          style={{
+                            background: 'linear-gradient(to right, #f0fdf4, #eff6ff)',
+                            borderLeft: '3px solid #10b981',
+                            marginTop: 8,
+                            marginBottom: 8
+                          }}
+                        >
+                          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                            <Text strong style={{ color: '#10b981' }}>📚 Sources & Citations</Text>
+                            {msg.metadata.documents.map((doc: any, idx: number) => (
+                              <Card key={idx} size="small" style={{ background: 'white' }}>
+                                <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                                  <Space>
+                                    <Tag color="green">{idx + 1}</Tag>
+                                    <Text strong>{doc.title}</Text>
+                                  </Space>
+
+                                  {msg.metadata.contextInfo?.qaMatch && doc.source && (
+                                    <div style={{ background: '#eff6ff', padding: '8px', borderRadius: '4px' }}>
+                                      <Text style={{ fontSize: '12px' }}>
+                                        <strong>📝 Question:</strong> {doc.source}
+                                      </Text>
+                                    </div>
+                                  )}
+
+                                  {doc.page && (
+                                    <Text style={{ fontSize: '12px' }}>
+                                      <strong>📄 Page:</strong> {doc.page}
+                                      {doc.totalPages && ` of ${doc.totalPages}`}
+                                    </Text>
+                                  )}
+
+                                  {doc.documentName && (
+                                    <Text style={{ fontSize: '12px' }}>
+                                      <strong>📖 Document:</strong> {doc.documentName}
+                                    </Text>
+                                  )}
+
+                                  {doc.excerpt && (
+                                    <Text
+                                      style={{
+                                        fontSize: '12px',
+                                        fontStyle: 'italic',
+                                        color: '#6b7280',
+                                        borderLeft: '2px solid #d1d5db',
+                                        paddingLeft: '8px',
+                                        display: 'block',
+                                        marginTop: '4px'
+                                      }}
+                                    >
+                                      "{doc.excerpt}"
+                                    </Text>
+                                  )}
+
+                                  <Space wrap>
+                                    <Tag color="success">✓ Relevance: {doc.relevanceScore}</Tag>
+                                    {doc.matchType && (
+                                      <Tag color="blue">{doc.matchType.replace('_', ' ')}</Tag>
+                                    )}
+                                  </Space>
+                                </Space>
+                              </Card>
+                            ))}
+
+                            {msg.metadata.sourceDisplay && (
+                              <Text style={{ fontSize: '12px', color: '#6b7280' }}>
+                                <strong>💡 Source:</strong> {msg.metadata.sourceDisplay}
+                              </Text>
+                            )}
+                          </Space>
+                        </Card>
+                      )}
+
+                      <Paragraph style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</Paragraph>
                       {msg.confidence && (
                         <Text type="secondary">Confidence: {msg.confidence}%</Text>
                       )}

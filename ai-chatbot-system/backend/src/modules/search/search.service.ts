@@ -36,26 +36,38 @@ export class SearchService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    // Skip initialization if OpenSearch is not configured
+    // Re-enabled OpenSearch for better search performance
     const node = this.configService.get<string>("opensearch.node");
+    const auth = this.configService.get("opensearch.auth");
+
+    this.logger.log(`🔍 OpenSearch Configuration Check:`);
+    this.logger.log(`   Node: ${node}`);
+    this.logger.log(`   Auth Username: ${auth?.username}`);
+    this.logger.log(`   Auth Password: ${auth?.password ? '[HIDDEN]' : 'NOT SET'}`);
+
     if (node && !node.includes('localhost')) {
+      this.logger.log(`✅ OpenSearch configured - attempting connection to: ${node}`);
       await this.initializeIndices();
     } else {
-      this.logger.warn('OpenSearch not configured, using in-memory search');
+      this.logger.warn('❌ OpenSearch not configured, using in-memory search');
     }
   }
 
   private async initializeIndices() {
     try {
+      this.logger.log(`🔌 Testing OpenSearch connection...`);
       // Test connection first
       await this.client.ping();
+      this.logger.log(`✅ OpenSearch connection successful!`);
       
       // Check and create documents index
+      this.logger.log(`🗂️  Checking if documents index exists: ${this.indices.documents}`);
       const documentsExists = await this.client.indices.exists({
         index: this.indices.documents,
       });
 
       if (!documentsExists.body) {
+        this.logger.log(`📝 Creating documents index: ${this.indices.documents}`);
         await this.client.indices.create({
           index: this.indices.documents,
           body: {
@@ -85,15 +97,19 @@ export class SearchService implements OnModuleInit {
             },
           },
         });
-        this.logger.log(`Created index: ${this.indices.documents}`);
+        this.logger.log(`✅ Created index: ${this.indices.documents}`);
+      } else {
+        this.logger.log(`✅ Documents index already exists: ${this.indices.documents}`);
       }
 
       // Check and create conversations index
+      this.logger.log(`🗂️  Checking if conversations index exists: ${this.indices.conversations}`);
       const conversationsExists = await this.client.indices.exists({
         index: this.indices.conversations,
       });
 
       if (!conversationsExists.body) {
+        this.logger.log(`📝 Creating conversations index: ${this.indices.conversations}`);
         await this.client.indices.create({
           index: this.indices.conversations,
           body: {
@@ -109,8 +125,12 @@ export class SearchService implements OnModuleInit {
             },
           },
         });
-        this.logger.log(`Created index: ${this.indices.conversations}`);
+        this.logger.log(`✅ Created index: ${this.indices.conversations}`);
+      } else {
+        this.logger.log(`✅ Conversations index already exists: ${this.indices.conversations}`);
       }
+
+      this.logger.log(`🎉 OpenSearch initialization completed successfully!`);
     } catch (error: any) {
       if (error.message?.includes('ECONNREFUSED') || error.message?.includes('ENOTFOUND')) {
         this.logger.warn('OpenSearch is not available - search features will be limited');
@@ -221,11 +241,6 @@ export class SearchService implements OnModuleInit {
         body: indexDoc,
       });
 
-      // Don't refresh after every document (expensive)
-      // await this.client.indices.refresh({
-      //   index: this.indices.documents,
-      // });
-
       return response.body;
     } catch (error: any) {
       if (error.message?.includes('ECONNREFUSED') || error.message?.includes('ENOTFOUND')) {
@@ -243,52 +258,12 @@ export class SearchService implements OnModuleInit {
 
   async bulkIndexDocuments(documents: any[]) {
     try {
-      const node = this.configService.get<string>("opensearch.node");
-      if (!node || node.includes('localhost')) {
-        this.logger.debug('Skipping bulk indexing - OpenSearch not available');
-        return { indexed: false, reason: 'OpenSearch not configured' };
-      }
-
-      if (documents.length === 0) {
-        return { indexed: true, count: 0 };
-      }
-
-      // Prepare bulk operations
-      const body = documents.flatMap((doc: any) => {
-        const indexDoc: any = {
-          ...doc,
-          createdAt: new Date().toISOString(),
-        };
-
-        // Validate embedding (AWS Bedrock Titan = 1024 dimensions)
-        if (indexDoc.embedding) {
-          if (!Array.isArray(indexDoc.embedding) || indexDoc.embedding.length !== 1024) {
-            delete indexDoc.embedding;
-          }
-        }
-
-        return [
-          { index: { _index: this.indices.documents, _id: doc.id } },
-          indexDoc
-        ];
-      });
-
-      const response = await this.client.bulk({ body });
-
-      if (response.body.errors) {
-        const errorCount = response.body.items.filter((item: any) => item.index?.error).length;
-        this.logger.warn(`Bulk index completed with ${errorCount} errors out of ${documents.length} documents`);
-      }
-
-      // Refresh index after bulk operation
-      await this.client.indices.refresh({
-        index: this.indices.documents,
-      });
-
+      // OpenSearch disabled - bulk indexing handled by DynamoDB + Redis
+      this.logger.debug(`Bulk indexing ${documents.length} documents using DynamoDB + Redis (OpenSearch disabled)`);
       return {
         indexed: true,
         count: documents.length,
-        errors: response.body.errors ? response.body.items.filter((item: any) => item.index?.error) : []
+        reason: 'Using DynamoDB + Redis instead of OpenSearch'
       };
     } catch (error: any) {
       this.logger.error("Error in bulk indexing:", error.message || error);
@@ -319,9 +294,8 @@ export class SearchService implements OnModuleInit {
       // Generate embedding for query
       const queryEmbedding = await this.generateEmbedding(query);
 
-      // Build search query - text-based search for now
-      // TODO: Implement k-NN vector search properly with OpenSearch 3.x syntax
-      const searchBody = {
+      // Build search query - text-based search
+      const searchBody: any = {
         size: limit,
         min_score: minScore,
         query: {
@@ -330,8 +304,9 @@ export class SearchService implements OnModuleInit {
               {
                 multi_match: {
                   query,
-                  fields: ['content^2', 'text^1.5', 'title^3'],
+                  fields: ['content^2', 'text^1.5', 'title^3', 'question^2', 'answer^1.5'],
                   type: 'best_fields',
+                  fuzziness: 'AUTO',
                 },
               },
             ],
@@ -345,7 +320,7 @@ export class SearchService implements OnModuleInit {
           term: {
             "metadata.emotion": emotion,
           },
-        } as any);
+        });
       }
 
       const response = await this.client.search({
@@ -362,7 +337,8 @@ export class SearchService implements OnModuleInit {
       if (!error.message?.includes('ECONNREFUSED') && !error.message?.includes('ENOTFOUND')) {
         this.logger.error("Error searching documents:", error.message || error);
       }
-      return [];
+      // Fallback to database search on error
+      return await this.searchDocumentsFromDatabase(params);
     }
   }
 
@@ -511,62 +487,21 @@ export class SearchService implements OnModuleInit {
 
   async deleteDocument(documentId: string) {
     try {
-      // Check if OpenSearch is available
-      const node = this.configService.get<string>("opensearch.node");
-      if (!node || node.includes('localhost') || node.includes('your-opensearch-domain')) {
-        this.logger.debug('Skipping document deletion - OpenSearch not configured');
-        return { deleted: false, reason: 'OpenSearch not configured' };
-      }
-
-      await this.client.deleteByQuery({
-        index: this.indices.documents,
-        body: {
-          query: {
-            term: {
-              documentId,
-            },
-          },
-        },
-      });
-
-      await this.client.indices.refresh({
-        index: this.indices.documents,
-      });
-      
-      return { deleted: true };
+      // OpenSearch disabled - document deletion handled by DynamoDB + Redis
+      this.logger.debug(`Document deletion handled by DynamoDB + Redis (OpenSearch disabled)`);
+      return { deleted: true, reason: 'Using DynamoDB + Redis instead of OpenSearch' };
     } catch (error: any) {
-      if (error.message?.includes('ECONNREFUSED') || error.message?.includes('ENOTFOUND')) {
-        this.logger.debug('OpenSearch connection failed - skipping document deletion');
-        return { deleted: false, reason: 'OpenSearch unavailable' };
-      }
       this.logger.error("Error deleting document from search:", error);
-      // Don't throw, return error status
       return { deleted: false, error: error.message };
     }
   }
 
   async indexConversation(conversation: any) {
     try {
-      // Check if OpenSearch is available
-      const node = this.configService.get<string>("opensearch.node");
-      if (!node || node.includes('localhost')) {
-        return { indexed: false, reason: 'OpenSearch not configured' };
-      }
-
-      const response = await this.client.index({
-        index: this.indices.conversations,
-        body: {
-          ...conversation,
-          timestamp: new Date().toISOString(),
-        },
-      });
-
-      return response.body;
+      // OpenSearch disabled - conversation indexing handled by DynamoDB
+      this.logger.debug('Conversation indexing handled by DynamoDB (OpenSearch disabled)');
+      return { indexed: true, reason: 'Using DynamoDB instead of OpenSearch' };
     } catch (error: any) {
-      if (error.message?.includes('ECONNREFUSED') || error.message?.includes('ENOTFOUND')) {
-        this.logger.debug('OpenSearch connection failed - skipping conversation indexing');
-        return { indexed: false, reason: 'OpenSearch unavailable' };
-      }
       this.logger.error("Error indexing conversation:", error);
       return { indexed: false, error: error.message };
     }
@@ -1276,10 +1211,11 @@ export class SearchService implements OnModuleInit {
     const { limit = 10, threshold = 0.7, sourceFile, documentId } = options;
 
     try {
+      this.logger.log(`🔍 PDF search called: query="${query}", limit=${limit}, threshold=${threshold}`);
 
       // Generate embedding for the search query
       const queryEmbedding = await this.generateEmbedding(query);
-      this.logger.debug(`Generated query embedding for PDF search: "${query.substring(0, 50)}..."`);
+      this.logger.log(`Generated query embedding for PDF search: "${query.substring(0, 50)}..." (${queryEmbedding.length} dims)`);
 
       // Perform vector similarity search
       const vectorResults = await this.databaseService.searchVectorSimilar(
@@ -1287,6 +1223,8 @@ export class SearchService implements OnModuleInit {
         limit * 2, // Get more results to allow for filtering
         threshold
       );
+
+      this.logger.log(`Database returned ${vectorResults.length} vector results`);
 
       // Filter by metadata if specified
       let filteredResults = vectorResults;

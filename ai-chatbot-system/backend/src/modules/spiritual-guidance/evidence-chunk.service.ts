@@ -48,19 +48,23 @@ export class EvidenceChunkService {
     const chunks: EvidenceChunk[] = [];
 
     try {
-      // Split document into chapters first
-      const chapterSections = documentText.split(/\n(?=CHAPTER\s+\d+)/);
+      // Enhanced chapter detection - split by CHAPTER headers AND detect missing chapters by content patterns
+      let chapterSections = documentText.split(/\n(?=CHAPTER\s+\d+)/);
+
+      // Check for missing chapter boundaries and fix them
+      chapterSections = this.fixMissingChapterBoundaries(chapterSections, documentText);
+
       const expectedChapters = chapterSections.filter(s => s.includes('CHAPTER')).length;
 
-      this.logger.log(`Found ${expectedChapters} chapters in ${sourceFile}`);
+      this.logger.log(`Found ${expectedChapters} chapters in ${sourceFile} (after boundary correction)`);
 
       // Parse ALL evidence from entire document at once
       const allEvidence = this.evidenceParser.parseEvidence(documentText, sourceFile);
 
       this.logger.log(`Found ${allEvidence.length} evidence items by quote parsing in ${sourceFile}`);
 
-      // FALLBACK: If quote parsing fails (< 10 evidence items for a multi-chapter document), use raw text extraction
-      const useGenericChunks = allEvidence.length < 10;
+      // ALWAYS use new Scholarly Evidence table extraction (disable fallback to old logic)
+      const useGenericChunks = true; // Force use of new table extraction logic
 
       let chunkIndex = 0;
 
@@ -72,22 +76,22 @@ export class EvidenceChunkService {
 
         // Get chapter/disease name
         // PDF structure: "CHAPTER X\n[optional arabic]\n[optional numbers]\nDISEASE NAME"
-        const afterChapter = section.substring(0, 600); // First 600 chars
+        const afterChapter = section.substring(0, 1000); // First 1000 chars for better coverage
         const chapterNumMatch = afterChapter.match(/CHAPTER\s*(\d+)/);
 
         if (!chapterNumMatch) {
           continue; // Skip if no CHAPTER number found
         }
 
-        // Look through lines after CHAPTER to find disease name
+        // Look through lines after CHAPTER to find disease name (title appears after "Chapter XX")
         const lines = afterChapter.split('\n');
         const chapterLineIdx = lines.findIndex(l => l.includes('CHAPTER'));
 
         let diseaseName = `Section ${chunkIndex + 1}`;
 
-        // Check next 10 lines after CHAPTER line, collecting capital letter lines
+        // Extract the actual chapter title from lines immediately following "CHAPTER XX"
         const capitalLines: string[] = [];
-        for (let i = chapterLineIdx + 1; i < Math.min(chapterLineIdx + 11, lines.length); i++) {
+        for (let i = chapterLineIdx + 1; i < Math.min(chapterLineIdx + 15, lines.length); i++) {
           const line = lines[i].trim();
 
           // Skip empty lines, arabic text, and numbers
@@ -104,9 +108,9 @@ export class EvidenceChunkService {
 
             capitalLines.push(line);
 
-            // If we have a line that looks like a complete word (12+ chars OR ends with common suffixes), use it
-            const looksComplete = line.length >= 12 ||
-                                 line.match(/ING$|NESS$|ANCE$|ITY$|HOOD$|SHIP$|MENT$/);
+            // If we have a line that looks like a complete word (15+ chars OR ends with common suffixes AND is long enough), use it
+            const looksComplete = line.length >= 15 ||
+                                 (line.match(/ING$|NESS$|ANCE$|ITY$|HOOD$|SHIP$|MENT$/) && line.length >= 8);
 
             if (looksComplete) {
               diseaseName = line
@@ -137,9 +141,8 @@ export class EvidenceChunkService {
         let evidenceText: string;
 
         if (useGenericChunks) {
-          // FALLBACK: Extract evidence section text directly
-          const evidenceMatch = section.match(/(?:Qur[''']?[āa]nic|Prophetic)[^\n]*[\s\S]{100,3000}?(?=(?:Academic|Treatment|CHAPTER|$))/i);
-          const rawEvidence = evidenceMatch ? evidenceMatch[0] : '';
+          // FALLBACK: Extract evidence from 2-column table structure
+          let rawEvidence = this.extractScholarlyEvidenceFromTable(section);
 
           this.logger.log(`Fallback mode: Found ${rawEvidence.length} chars of raw evidence for "${diseaseName}"`);
 
@@ -426,5 +429,478 @@ export class EvidenceChunkService {
    */
   formatEvidenceForDisplay(chunk: EvidenceChunk, language: 'en' | 'vi' = 'vi'): string {
     return chunk.evidenceText;
+  }
+
+  /**
+   * Extract ONLY from Scholarly Evidence tables with 2-column structure
+   * Column 1: Conditions (skip bold text rows, only get normal text)
+   * Column 2: Scholarly Evidence answers
+   * Skip all other content outside these specific tables
+   */
+  private extractScholarlyEvidenceFromTable(text: string): string {
+    const evidenceEntries: string[] = [];
+
+    try {
+      // Find all Scholarly Evidence tables in the text
+      const tableMatches = this.findScholarlyEvidenceTables(text);
+
+      if (tableMatches.length === 0) {
+        this.logger.debug('No Scholarly Evidence tables found, skipping this section');
+        return ''; // Skip if no Scholarly Evidence tables found
+      }
+
+      this.logger.log(`Found ${tableMatches.length} Scholarly Evidence table(s)`);
+
+      for (let tableIndex = 0; tableIndex < tableMatches.length; tableIndex++) {
+        const tableContent = tableMatches[tableIndex];
+        this.logger.log(`🔍 Table ${tableIndex + 1} content preview (first 200 chars): "${tableContent.substring(0, 200)}..."`);
+
+        const tableEntries = this.parseScholarlyEvidenceTable(tableContent);
+        evidenceEntries.push(...tableEntries);
+      }
+
+      const result = evidenceEntries.join('\n\n---\n\n');
+      this.logger.log(`Extracted ${evidenceEntries.length} condition-evidence pairs (${result.length} chars)`);
+      return result;
+
+    } catch (error) {
+      this.logger.warn('Error extracting from Scholarly Evidence tables:', error);
+      return ''; // Return empty instead of fallback
+    }
+  }
+
+  /**
+   * Merge broken text lines from PDF extraction
+   * Combines short fragments like "A", "llāh", "s", "ays:" into "Allāh says:"
+   */
+  private mergeBrokenTextLines(lines: string[]): string[] {
+    const merged: string[] = [];
+    let currentLine = '';
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // Skip the header
+      if (line.match(/Scholarly\s+Evidence/i)) {
+        if (currentLine) {
+          merged.push(currentLine.trim());
+          currentLine = '';
+        }
+        merged.push(line);
+        continue;
+      }
+
+      // If this is a very short line (1-3 chars), it's likely a fragment
+      if (line.length <= 3) {
+        currentLine += line;
+      }
+      // If this is a short line that might be continuing a word
+      else if (line.length <= 10 && currentLine && !currentLine.endsWith(' ')) {
+        currentLine += line;
+      }
+      // If we have accumulated content and this looks like a continuation
+      else if (currentLine && line.length <= 15 && !line.match(/^[A-Z]/) && !line.includes(':')) {
+        currentLine += ' ' + line;
+      }
+      // This looks like a new complete line
+      else {
+        if (currentLine) {
+          merged.push(currentLine.trim());
+        }
+        currentLine = line;
+      }
+    }
+
+    // Add any remaining content
+    if (currentLine) {
+      merged.push(currentLine.trim());
+    }
+
+    this.logger.log(`📝 Merged ${lines.length} broken lines into ${merged.length} complete lines`);
+    return merged.filter(line => line.length > 0);
+  }
+
+  /**
+   * Find all Scholarly Evidence tables in the text
+   * Returns array of table content strings
+   */
+  private findScholarlyEvidenceTables(text: string): string[] {
+    const tables: string[] = [];
+
+    this.logger.log(`🔍 Searching for Scholarly Evidence tables in ${text.length} chars of text`);
+
+    // Look for "Scholarly Evidence" headers followed by table-like content
+    const tableHeaderPattern = /Scholarly\s+Evidence[\s\S]*?(?=(?:Treatment|Academic|CHAPTER|$))/gi;
+    let match;
+    let matchCount = 0;
+
+    while ((match = tableHeaderPattern.exec(text)) !== null) {
+      matchCount++;
+      const tableContent = match[0];
+      this.logger.log(`📋 Found potential table ${matchCount} (${tableContent.length} chars): "${tableContent.substring(0, 100)}..."`);
+
+      // Verify this looks like a real table with 2-column structure
+      if (this.isValidScholarlyEvidenceTable(tableContent)) {
+        tables.push(tableContent);
+        this.logger.log(`✅ Table ${matchCount} validated and added`);
+      } else {
+        this.logger.log(`❌ Table ${matchCount} failed validation`);
+      }
+    }
+
+    this.logger.log(`🎯 Found ${tables.length} valid Scholarly Evidence tables out of ${matchCount} potential matches`);
+    return tables;
+  }
+
+  /**
+   * Check if the content is a valid Scholarly Evidence table
+   */
+  private isValidScholarlyEvidenceTable(content: string): boolean {
+    // Must contain "Scholarly Evidence" header
+    const hasHeader = !!content.match(/Scholarly\s+Evidence/i);
+    this.logger.log(`🏷️  Validation: hasHeader=${hasHeader}`);
+
+    if (!hasHeader) {
+      return false;
+    }
+
+    // Must have some evidence indicators (Allah, Prophet, Quran, etc.)
+    const evidenceIndicators = content.match(/(All[aā]h\s+says?|Prophet\s+said|Hadith|Qur[''']?[āa]n|Imām|Scholar)/gi);
+    const hasEvidence = !!(evidenceIndicators && evidenceIndicators.length > 0);
+
+    this.logger.log(`📚 Validation: hasEvidence=${hasEvidence} (found ${evidenceIndicators?.length || 0} indicators)`);
+    if (evidenceIndicators) {
+      this.logger.log(`📚 Evidence indicators found: ${evidenceIndicators.slice(0, 3).join(', ')}${evidenceIndicators.length > 3 ? '...' : ''}`);
+    }
+
+    return hasEvidence;
+  }
+
+  /**
+   * Parse a single Scholarly Evidence table into condition-evidence pairs
+   * Skip bold text rows in column 1, only get normal text conditions
+   */
+  private parseScholarlyEvidenceTable(tableContent: string): string[] {
+    const entries: string[] = [];
+
+    try {
+      // Split into lines and clean them
+      let lines = tableContent.split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+
+      // Fix broken text by merging short fragments
+      lines = this.mergeBrokenTextLines(lines);
+
+      this.logger.log(`📋 Parsing table with ${lines.length} lines. First 10 lines: ${lines.slice(0, 10).join(' | ')}`);
+
+      // Skip the header line(s)
+      let dataStartIndex = 0;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].match(/Scholarly\s+Evidence/i)) {
+          dataStartIndex = i + 1;
+          this.logger.log(`📍 Found Scholarly Evidence header at line ${i}, starting data from line ${dataStartIndex}`);
+          break;
+        }
+      }
+
+      // Process table rows as pairs (condition + evidence)
+      for (let i = dataStartIndex; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Skip empty lines and section headers
+        if (!line || this.isTableSectionHeader(line)) {
+          this.logger.debug(`Skipping line ${i}: "${line}" (empty or header)`);
+          continue;
+        }
+
+        this.logger.debug(`Processing line ${i}: "${line}"`);
+
+        // Try to extract condition-evidence pair from this line and subsequent lines
+        const entry = this.extractConditionEvidencePair(lines, i);
+        if (entry) {
+          entries.push(entry.text);
+          i = entry.nextIndex - 1; // Skip processed lines
+          this.logger.debug(`Found entry, moving to line ${entry.nextIndex}`);
+        }
+      }
+
+      this.logger.log(`Parsed ${entries.length} condition-evidence pairs from table`);
+      return entries;
+
+    } catch (error) {
+      this.logger.warn('Error parsing Scholarly Evidence table:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Check if a line is a table section header (to skip)
+   */
+  private isTableSectionHeader(line: string): boolean {
+    return line.match(/^(Scholarly\s+Evidence|Treatment|Academic|Evidence|CHAPTER)/i) !== null;
+  }
+
+  /**
+   * Extract a condition-evidence pair from table lines
+   * Returns the formatted entry and the next index to process
+   */
+  private extractConditionEvidencePair(lines: string[], startIndex: number): {text: string, nextIndex: number} | null {
+    let condition = '';
+    let evidence = '';
+    let i = startIndex;
+
+    this.logger.debug(`extractConditionEvidencePair starting at line ${startIndex}: "${lines[startIndex]?.substring(0, 50)}..."`);
+
+    // Look for the condition (first column - skip if bold text)
+    while (i < lines.length) {
+      const line = lines[i];
+
+      // Stop if we hit a new section or another condition starts
+      if (this.isTableSectionHeader(line) || this.looksLikeNewCondition(line, i > startIndex)) {
+        this.logger.debug(`Stopping condition search at line ${i}: section header or new condition`);
+        break;
+      }
+
+      // Skip bold text rows in first column (usually uppercase or header-like)
+      if (this.isBoldTextRow(line)) {
+        this.logger.debug(`Skipping bold text row: "${line.substring(0, 50)}..."`);
+        i++;
+        continue;
+      }
+
+      // Check if this line contains a condition (normal text)
+      if (this.isConditionText(line) && !condition) {
+        condition = line;
+        this.logger.debug(`Found condition: "${condition.substring(0, 50)}..."`);
+        i++;
+        break; // Move to look for evidence
+      } else {
+        this.logger.debug(`Line ${i} not condition text: "${line.substring(0, 50)}..."`);
+      }
+
+      i++;
+    }
+
+    // Look for the evidence (second column - scholarly evidence content)
+    while (i < lines.length) {
+      const line = lines[i];
+
+      // Stop if we hit a new section or another condition starts
+      if (this.isTableSectionHeader(line) || this.looksLikeNewCondition(line, true)) {
+        this.logger.debug(`Stopping evidence search at line ${i}: section header or new condition`);
+        break;
+      }
+
+      // Collect evidence content (references to Allah, Prophet, Quran, etc.)
+      if (this.isScholarlyEvidenceContent(line)) {
+        evidence += (evidence ? ' ' : '') + line;
+        this.logger.debug(`Added evidence from line ${i}: "${line.substring(0, 30)}..." (total: ${evidence.length} chars)`);
+      } else {
+        this.logger.debug(`Line ${i} not evidence content: "${line.substring(0, 50)}..."`);
+      }
+
+      i++;
+
+      // Stop collecting if we have substantial evidence content
+      if (evidence.length > 200) {
+        this.logger.debug(`Stopping evidence collection - reached 200+ chars`);
+        break;
+      }
+    }
+
+    this.logger.debug(`Extraction result: condition=${condition ? 'YES' : 'NO'} (${condition.length} chars), evidence=${evidence ? 'YES' : 'NO'} (${evidence.length} chars)`);
+
+    // More lenient requirements - the text merging is working well
+    if (condition && evidence && condition.length > 5 && evidence.length > 20) {
+      const formattedEntry = `**Condition:** ${condition}\n\n**Scholarly Evidence:** ${evidence}`;
+      this.logger.log(`✅ Created condition-evidence pair: "${condition.substring(0, 50)}..." -> "${evidence.substring(0, 50)}..."`);
+      return {
+        text: formattedEntry,
+        nextIndex: i
+      };
+    }
+
+    // Debug why no pair was created
+    this.logger.log(`❌ No pair created: condition="${condition ? 'YES' : 'NO'}" (${condition?.length || 0} chars), evidence="${evidence ? 'YES' : 'NO'}" (${evidence?.length || 0} chars)`);
+    return null;
+  }
+
+  /**
+   * Check if a line contains bold text (usually uppercase or header-like)
+   */
+  private isBoldTextRow(line: string): boolean {
+    // Skip lines that are mostly uppercase (likely bold headers)
+    const uppercaseRatio = (line.match(/[A-Z]/g) || []).length / line.length;
+    if (uppercaseRatio > 0.7) {
+      return true;
+    }
+
+    // Skip lines that look like headers
+    if (line.match(/^(SIGNS?|SYMPTOMS?|EVIDENCE|TREATMENT|CONDITIONS?)/i)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if a line contains condition text (normal text for conditions)
+   */
+  private isConditionText(line: string): boolean {
+    // Skip very short lines
+    if (line.length < 5) {
+      return false;
+    }
+
+    // Must be normal text (not mostly uppercase)
+    const uppercaseRatio = (line.match(/[A-Z]/g) || []).length / line.length;
+    if (uppercaseRatio > 0.8) { // More lenient - was 0.7
+      return false;
+    }
+
+    // Skip obvious evidence content
+    if (this.isScholarlyEvidenceContent(line)) {
+      return false;
+    }
+
+    // Look for condition patterns like "Lacking Certainty in Allāh"
+    const isConditionTitle = line.match(/(lacking|having|feeling|experiencing|being|showing|in|of|with|without)\s+\w+/i) !== null;
+
+    // Or general descriptive text that's not evidence
+    const isSentenceLike = line.length > 10 && !!line.match(/[a-z]/) && !line.includes('says') && !line.includes('Prophet');
+
+    this.logger.log(`🔍 isConditionText("${line}"): isConditionTitle=${isConditionTitle}, isSentenceLike=${isSentenceLike}, uppercaseRatio=${uppercaseRatio.toFixed(2)}`);
+
+    return isConditionTitle || isSentenceLike;
+  }
+
+  /**
+   * Check if a line contains scholarly evidence content
+   */
+  private isScholarlyEvidenceContent(line: string): boolean {
+    const hasEvidenceMarkers = line.match(/(All[aā]h\s+says?|Prophet\s+said|Hadith|Qur[''']?[āa]n|Imām|Scholar|Academic|Reference|says\s+in|according\s+to|verses?|chapter|surah)/i) !== null;
+
+    // Also consider quoted text or verse references as evidence
+    const hasQuotes = line.includes('"') || line.includes('"') || line.includes('"');
+    const hasVerseRef = line.match(/\[\w+-\w+\s+\d+:\d+\]/i) !== null; // [Al-Mu'minūn 23:117]
+
+    const isEvidence = hasEvidenceMarkers || hasQuotes || hasVerseRef;
+    this.logger.log(`🔍 isScholarlyEvidenceContent("${line.substring(0, 50)}..."): hasEvidenceMarkers=${hasEvidenceMarkers}, hasQuotes=${hasQuotes}, hasVerseRef=${hasVerseRef}, result=${isEvidence}`);
+
+    return isEvidence;
+  }
+
+  /**
+   * Check if a line looks like it starts a new condition
+   */
+  private looksLikeNewCondition(line: string, hasSeenContent: boolean): boolean {
+    if (!hasSeenContent) {
+      return false;
+    }
+
+    // If we see "you feel/have/experience" it's likely a new condition
+    return line.match(/\b(?:you\s+(?:feel|have|experience|become|show)|feeling|experiencing)/i) !== null;
+  }
+
+
+  /**
+   * Fix missing chapter boundaries by detecting internal chapter patterns
+   * Handles cases where CHAPTER headers are missing in PDF extraction
+   */
+  private fixMissingChapterBoundaries(sections: string[], fullText: string): string[] {
+    const fixedSections: string[] = [];
+
+    for (const section of sections) {
+      // Check if this section might contain multiple chapters
+      const internalChapters = this.detectInternalChapterBoundaries(section);
+
+      if (internalChapters.length > 1) {
+        this.logger.log(`Found ${internalChapters.length} internal chapters in section`);
+        fixedSections.push(...internalChapters);
+      } else {
+        fixedSections.push(section);
+      }
+    }
+
+    return fixedSections;
+  }
+
+  /**
+   * Detect chapter boundaries within a section based on content patterns
+   * Looks for disease names and content patterns that indicate new chapters
+   */
+  private detectInternalChapterBoundaries(text: string): string[] {
+    const sections: string[] = [];
+
+    // Known chapter patterns and disease names from the spiritual guidance handbook
+    const chapterPatterns = [
+      // Common disease/condition patterns that start new chapters
+      /(?:^|\n\n+)([A-Z][A-Z\s]{10,50})\s*\n+(?:Signs?\s*&?\s*Symptoms?|You\s+(?:feel|experience|have)|Description:|الأعراض)/im,
+
+      // Specific diseases mentioned by user
+      /(?:^|\n\n+)(INIQUITY|BAGHI|باغي)\s*\[.*?\]?\s*\n/im,
+      /(?:^|\n\n+)(LOVE\s+OF\s+THE\s+WORLD|حب\s+الدنيا)\s*\n/im,
+      /(?:^|\n\n+)(WITHDRAWAL\s+OF\s+ALLAH|انسحاب\s+الله)\s*\n/im,
+
+      // General patterns for spiritual conditions
+      /(?:^|\n\n+)([A-Z][A-Z\s&'-]{8,40})\s*\n+(?=.*(?:Signs|Symptoms|Evidence|Qur|Prophet|Treatment))/im
+    ];
+
+    let currentPos = 0;
+    let lastSectionEnd = 0;
+
+    // Find all potential chapter boundaries
+    const boundaries: Array<{pos: number, title: string}> = [];
+
+    for (const pattern of chapterPatterns) {
+      let match;
+      const regex = new RegExp(pattern.source, pattern.flags + 'g');
+
+      while ((match = regex.exec(text)) !== null) {
+        const title = match[1]?.trim();
+        if (title && title.length > 5) {
+          boundaries.push({
+            pos: match.index,
+            title: title
+          });
+        }
+      }
+    }
+
+    // Sort boundaries by position
+    boundaries.sort((a, b) => a.pos - b.pos);
+
+    // Remove duplicate/overlapping boundaries
+    const uniqueBoundaries = boundaries.filter((boundary, index) => {
+      if (index === 0) return true;
+      const prevBoundary = boundaries[index - 1];
+      return boundary.pos - prevBoundary.pos > 200; // Must be at least 200 chars apart
+    });
+
+    this.logger.log(`Found ${uniqueBoundaries.length} potential chapter boundaries`);
+
+    if (uniqueBoundaries.length <= 1) {
+      // No internal boundaries found, return original text
+      return [text];
+    }
+
+    // Split text at boundaries
+    for (let i = 0; i < uniqueBoundaries.length; i++) {
+      const boundary = uniqueBoundaries[i];
+      const nextBoundary = uniqueBoundaries[i + 1];
+
+      const startPos = i === 0 ? 0 : boundary.pos;
+      const endPos = nextBoundary ? nextBoundary.pos : text.length;
+
+      const sectionText = text.substring(startPos, endPos).trim();
+
+      if (sectionText.length > 100) { // Only include substantial sections
+        this.logger.log(`Creating section for: "${boundary.title}" (${sectionText.length} chars)`);
+        sections.push(sectionText);
+      }
+    }
+
+    return sections.length > 0 ? sections : [text];
   }
 }

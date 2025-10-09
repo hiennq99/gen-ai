@@ -25,7 +25,7 @@ export interface ChatResponse {
 }
 
 export interface MediaAttachment {
-  type: 'image' | 'video' | 'document' | 'suggestion';
+  type: 'image' | 'video' | 'gif' | 'document' | 'suggestion';
   url?: string;
   content?: string;
   caption?: string;

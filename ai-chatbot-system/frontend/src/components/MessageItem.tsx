@@ -96,7 +96,10 @@ const formatAnswerText = (text: string) => {
 
 // Helper function to render formatted text (same as admin CMS)
 const renderFormattedText = (text: string) => {
+  if (!text) return null;
+
   const formattedText = formatAnswerText(text);
+  if (!formattedText) return null;
 
   return formattedText.split('\n').map((line, index) => {
     const trimmedLine = line.trim();
@@ -195,6 +198,11 @@ export default function MessageItem({ message }: MessageItemProps) {
   const isUser = message.role === 'user';
   const [showEmotionDetails, setShowEmotionDetails] = useState(false);
 
+  // Debug log
+  if (message.emotionAnalysis) {
+    console.log('💚 Message has emotionAnalysis:', message.emotionAnalysis);
+  }
+
   return (
     <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
       {!isUser && (
@@ -213,14 +221,41 @@ export default function MessageItem({ message }: MessageItemProps) {
               : 'bg-gray-100 text-gray-900'
           }`}
         >
+          {/* Emotion badge for user messages */}
+          {isUser && message.emotion && (
+            <div className="mb-2 inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-white/20 backdrop-blur-sm">
+              {emotionIcons[message.emotion as keyof typeof emotionIcons]?.icon}
+              <span className="capitalize">{message.emotion}</span>
+            </div>
+          )}
+
           {isUser ? (
             // User messages use regular text
             <div className="whitespace-pre-wrap">{message.content}</div>
           ) : (
             // Assistant messages use custom formatting like admin CMS
-            <div className="prose prose-sm max-w-none">
-              {renderFormattedText(message.content)}
-            </div>
+            <>
+              {/* Emotion badge for assistant messages */}
+              {message.emotionTags?.responseEmotions && message.emotionTags.responseEmotions.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-1">
+                  {message.emotionTags.responseEmotions.slice(0, 2).map((emotion, idx) => {
+                    const emotionData = emotionIcons[emotion as keyof typeof emotionIcons];
+                    return emotionData ? (
+                      <span
+                        key={idx}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${emotionData.color}`}
+                      >
+                        {emotionData.icon}
+                        <span className="capitalize">{emotion}</span>
+                      </span>
+                    ) : null;
+                  })}
+                </div>
+              )}
+              <div className="prose prose-sm max-w-none">
+                {renderFormattedText(message.content)}
+              </div>
+            </>
           )}
 
           {/* Media Attachments */}
@@ -230,22 +265,46 @@ export default function MessageItem({ message }: MessageItemProps) {
               {message.media && message.media.length > 0 ? (
                 message.media.map((media, index) => (
                   <div key={index}>
-                    {media.type === 'image' && media.url && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={media.url}
-                        alt={media.caption || 'Attachment'}
-                        className="rounded-lg max-w-full"
-                        onError={(e) => {
-                          // Fallback to default image if provided media fails to load
-                          const target = e.target as HTMLImageElement;
-                          const defaultImage = getDefaultImage(
-                            message.emotion || message.emotionTags?.inputEmotions?.[0],
-                            message.content
-                          );
-                          target.src = defaultImage.url;
-                        }}
-                      />
+                    {(media.type === 'image' || media.type === 'gif') && media.url && (
+                      <div className="flex flex-col">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={media.url}
+                          alt={media.caption || 'Attachment'}
+                          className="rounded-lg max-w-full"
+                          onError={(e) => {
+                            // Fallback to default image if provided media fails to load
+                            const target = e.target as HTMLImageElement;
+                            const defaultImage = getDefaultImage(
+                              message.emotion || message.emotionTags?.inputEmotions?.[0],
+                              message.content
+                            );
+                            target.src = defaultImage.url;
+                          }}
+                        />
+                        {media.caption && (
+                          <div className="mt-1 text-xs text-gray-600 text-center">
+                            {media.caption}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {media.type === 'video' && media.url && (
+                      <div className="flex flex-col">
+                        <video
+                          src={media.url}
+                          controls
+                          className="rounded-lg max-w-full"
+                          preload="metadata"
+                        >
+                          Your browser does not support the video tag.
+                        </video>
+                        {media.caption && (
+                          <div className="mt-1 text-xs text-gray-600 text-center">
+                            {media.caption}
+                          </div>
+                        )}
+                      </div>
                     )}
                     {media.type === 'suggestion' && (
                       <div className="bg-white/10 rounded p-2 text-sm">
@@ -350,9 +409,142 @@ export default function MessageItem({ message }: MessageItemProps) {
           </div>
         )}
 
+        {/* Source Citations */}
+        {!isUser && message.metadata?.documents && message.metadata.documents.length > 0 && (
+          <div className="mt-2 px-3 py-2 bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg text-xs">
+            <div className="font-semibold text-gray-700 mb-2 flex items-center gap-1">
+              <BookOpen className="w-4 h-4 text-green-600" />
+              <span>📚 Sources & Citations</span>
+            </div>
+            <div className="space-y-2">
+              {message.metadata.documents.map((doc: any, idx: number) => (
+                <div key={idx} className="bg-white rounded p-2 border border-gray-200">
+                  <div className="flex items-start gap-2">
+                    <span className="flex-shrink-0 w-5 h-5 bg-green-600 text-white rounded-full flex items-center justify-center text-xs font-bold">
+                      {idx + 1}
+                    </span>
+                    <div className="flex-1 space-y-1">
+                      <div className="font-semibold text-gray-800">{doc.title}</div>
+
+                      {/* Q&A Match */}
+                      {message.metadata.contextInfo?.qaMatch && doc.source && (
+                        <div className="text-xs text-gray-600 bg-blue-50 px-2 py-1 rounded">
+                          <span className="font-medium">📝 Question:</span> {doc.source}
+                        </div>
+                      )}
+
+                      {/* Document Match with Page */}
+                      {doc.page && (
+                        <div className="text-xs text-gray-600">
+                          <span className="font-medium">📄 Page:</span> {doc.page}
+                          {doc.totalPages && ` of ${doc.totalPages}`}
+                        </div>
+                      )}
+
+                      {/* Document Name */}
+                      {doc.documentName && (
+                        <div className="text-xs text-gray-600">
+                          <span className="font-medium">📖 Document:</span> {doc.documentName}
+                        </div>
+                      )}
+
+                      {/* Excerpt */}
+                      {doc.excerpt && (
+                        <div className="text-xs text-gray-500 italic border-l-2 border-gray-300 pl-2 mt-1">
+                          "{doc.excerpt}"
+                        </div>
+                      )}
+
+                      {/* Relevance Score */}
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs font-medium text-green-700">
+                          ✓ Relevance: {doc.relevanceScore}
+                        </span>
+                        {doc.matchType && (
+                          <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded capitalize">
+                            {doc.matchType.replace('_', ' ')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Source Display Summary */}
+            {message.metadata.sourceDisplay && (
+              <div className="mt-2 pt-2 border-t border-gray-200 text-xs text-gray-600">
+                <span className="font-medium">💡 Source:</span> {message.metadata.sourceDisplay}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Emotion Analysis Details */}
+        {message.emotionAnalysis && (
+          <div className="mt-2 px-3 py-2 bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg text-xs">
+            <div className="font-semibold text-gray-700 mb-1.5 flex items-center gap-1">
+              <span className="text-blue-600">📊</span> Emotion Analysis
+            </div>
+            <div className="space-y-1 text-gray-700">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">Primary emotion:</span>
+                <span className="px-2 py-0.5 bg-white rounded font-semibold text-blue-700 capitalize">
+                  {message.emotionAnalysis.primaryEmotion || message.emotion}
+                </span>
+              </div>
+              {message.emotionAnalysis.intensity && (
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">Intensity:</span>
+                  <span className={`px-2 py-0.5 bg-white rounded font-semibold capitalize ${
+                    message.emotionAnalysis.intensity === 'high' ? 'text-red-600' :
+                    message.emotionAnalysis.intensity === 'medium' ? 'text-yellow-600' :
+                    'text-green-600'
+                  }`}>
+                    {message.emotionAnalysis.intensity}
+                  </span>
+                </div>
+              )}
+              {message.emotionAnalysis.confidence && (
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">Confidence:</span>
+                  <span className="px-2 py-0.5 bg-white rounded font-semibold text-purple-700">
+                    {message.emotionAnalysis.confidence}%
+                  </span>
+                </div>
+              )}
+              {message.emotionAnalysis.aiEnhanced && (
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded font-semibold text-[10px]">
+                    ✨ AI Enhanced
+                  </span>
+                </div>
+              )}
+              {message.emotionAnalysis.secondaryEmotions && message.emotionAnalysis.secondaryEmotions.length > 0 && (
+                <div className="flex items-start gap-2 mt-1">
+                  <span className="font-medium">Secondary:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {message.emotionAnalysis.secondaryEmotions.map((emotion: string, idx: number) => (
+                      <span key={idx} className="px-1.5 py-0.5 bg-white rounded text-gray-600 capitalize">
+                        {emotion}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Metadata */}
         <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
-          <span>{format(new Date(message.timestamp), 'HH:mm')}</span>
+          <span>
+            {message.timestamp && !isNaN(new Date(message.timestamp).getTime())
+              ? format(new Date(message.timestamp), 'HH:mm')
+              : '--:--'
+            }
+          </span>
           {/* Show single emotion icon for backward compatibility */}
           {message.emotion && emotionIcons[message.emotion as keyof typeof emotionIcons] && (
             <div className="flex items-center gap-1">

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { EmotionType } from '../emotion/interfaces/emotion.interface';
 
 export interface DummyMedia {
-  type: 'image' | 'video' | 'document' | 'suggestion';
+  type: 'image' | 'video' | 'gif' | 'document' | 'suggestion';
   url?: string;
   content?: string;
   caption?: string;
@@ -60,12 +60,39 @@ export class MediaService {
     ]
   };
 
-  // Dummy video URLs (using placeholder services)
-  private readonly dummyVideos = [
-    'https://sample-videos.com/zip/10/mp4/SampleVideo_360x240_1mb.mp4',
-    'https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-mp4-file.mp4',
-    'https://filesamples.com/samples/video/mp4/SampleVideo_720x480_1mb.mp4'
-  ];
+  // Mock GIF URLs categorized by emotion and content type (using reliable public GIFs)
+  private readonly dummyGifs: Record<string, string[]> = {
+    spiritual: [
+      'https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExMW5wdDlwZXJ6aWVyY3N2YzNhd2xqdXAwdzhjZmM2cGxpN2duNGhidyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l0MYt5jPR6QX5pnqM/giphy.gif',
+      'https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExeHh5ZGI1dGZ5OXZqYXNhbjVtcjA3dHY1YjN0amJoa3NoY3E1ZmZkOSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7abKhOpu0NwenH3O/giphy.gif',
+      'https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExbGhzZ3M1b3V1cXNydTU5aDJweDFhNW1ocTZqOGt5MWVvNTRybHZwOCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/xT9IgzoKnwFNmISR8I/giphy.gif'
+    ],
+    calming: [
+      'https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExbTN0dzdxa3ptNm9mdXF6dGp4MTNxYW04YzJzcjU5aHN6OWF0bjZvaiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/26u4lOMA8JKSnL9Uk/giphy.gif',
+      'https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExdnc1anZhYXZrZjJ0Y3U5bzJ0cXZuNzI2cXZ6cjg4cWV6bmw1M3hrNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3oriO7A7bt1wsEP4cw/giphy.gif',
+      'https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExenp5cGFxOXJ6Y3p2c2V5bjE1bHQ2d3NkeXFveDRvNThycGV4dnM3cCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l0HlHFRbmaZtBRhXG/giphy.gif'
+    ],
+    motivational: [
+      'https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExZ3IxZm1vNjF3bHk5cXZ3bjkya3htaHJ2d3pzdTBhdjl4a3U5YmdybSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7absbD7FgCKGEinC/giphy.gif',
+      'https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExNXUzNG5peXNtOWs3anE5dGYxemYzbmRyeGI5ZHk1ZGl6cXNzMjB3dyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/26u4cqiYI30juCOGY/giphy.gif',
+      'https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExMzFqaXFkemZ5dnl5bjVubTRvcDZjYWtjbWp1NjB0d21hYnk3eDc3ZCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l3q2K5jinAlChoCLS/giphy.gif'
+    ],
+    educational: [
+      'https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExZHNoN3MxbXA2bmN0MjdxNjhveWw3cW9majFqbGJwa2J6YW80N2Z6dCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/WoWm8YzFQJg5i/giphy.gif',
+      'https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExcXRxcGZmeGZkOG50bWg2eG0xOWl6Y2tpZHVuOWx0NGl3bGhvbnR3ZSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3ohzdIuqJoo8QdKlnW/giphy.gif',
+      'https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExOGl0dG9nbHloN3M1aXZ2czNqZTl5MnJqM3JhdWJyNTB1OHJycGR5ayZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/26tn33aiTi1jkl6H6/giphy.gif'
+    ],
+    happy: [
+      'https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExczd5cW42dzg5NXI2dzZuM29rZHdjNzR0c21hM2Q5MzZrYzFrcDZnNiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l1ughbsd9qXz2s9SE/giphy.gif',
+      'https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExaXp5NnZhaWVrd2JubWNtZnE3dGE4eXBva3Fqb3J5MDZoNXJ6NGdkZyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7aCSPqXE5C6T8tBC/giphy.gif',
+      'https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExNXE0d2p4Z3psc2xkYXF2cHF2MjlsZWVlcXpld2F4aGNxN3pmbGdhaSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/26u4hHj87jMePiO3u/giphy.gif'
+    ],
+    general: [
+      'https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExOWJ3ZTh5M3JlM3l0N29tZ3V2azY2djNkcW9mYjhtamhwa2N1MG9mYSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7qE1YN7aBOFPRw8E/giphy.gif',
+      'https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExYmJyOWZtdjFjZG9jb3MxeDdha3djdDNobXlyODFhOHN1czlkNTl6ZCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l2JhtKtDWYNKdRpoA/giphy.gif',
+      'https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExd2htM3ZrZnVuNXRrZGl5ZjF2YXNpNzNyNzJpdzN1NTJoa21rZGY5YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/26BRrSvJUa0crqw4E/giphy.gif'
+    ]
+  };
 
   generateDummyMedia(
     emotion: EmotionType,
@@ -81,23 +108,19 @@ export class MediaService {
     // ALWAYS include at least one image at the end of responses
     media.push(this.generateDummyImage(emotion, messageContent));
 
-    // 50% chance to add additional media (video or suggestions)
-    const shouldAddMoreMedia = Math.random() > 0.5;
+    // ALWAYS include a short GIF animation at the end of responses
+    media.push(this.generateDummyGif(emotion, messageContent));
 
-    if (shouldAddMoreMedia) {
-      // Determine additional media types based on emotion and content
-      const additionalMediaTypes = this.determineAdditionalMediaTypes(emotion, messageContent);
-
-      for (const mediaType of additionalMediaTypes) {
-        if (mediaType === 'video') {
-          media.push(this.generateDummyVideo(emotion, messageContent));
-        } else if (mediaType === 'suggestion') {
-          media.push(...this.generateSuggestions(emotion, messageContent));
-        }
+    // 30% chance to add suggestions for help-related content
+    const shouldAddSuggestions = Math.random() > 0.7;
+    if (shouldAddSuggestions) {
+      // Add suggestions for help-related content
+      if (messageContent.includes('?') || messageContent.includes('help') || emotion === 'confused') {
+        media.push(...this.generateSuggestions(emotion, messageContent));
       }
     }
 
-    return media.slice(0, 3); // Limit to 3 media items per response (image + 2 additional)
+    return media.slice(0, 3); // Limit to 3 media items per response (image + video + optional suggestion)
   }
 
   private determineAdditionalMediaTypes(emotion: EmotionType, messageContent: string): string[] {
@@ -143,14 +166,38 @@ export class MediaService {
     };
   }
 
-  private generateDummyVideo(emotion: EmotionType, messageContent: string): DummyMedia {
-    const randomVideo = this.dummyVideos[Math.floor(Math.random() * this.dummyVideos.length)];
+  private generateDummyGif(emotion: EmotionType, messageContent: string): DummyMedia {
+    // Determine GIF category based on emotion and content
+    let gifCategory: keyof typeof this.dummyGifs = 'general';
+
+    if (['sad', 'fear', 'angry'].includes(emotion)) {
+      gifCategory = 'calming';
+    } else if (['grateful', 'happy'].includes(emotion)) {
+      gifCategory = 'happy';
+    } else if (messageContent.toLowerCase().includes('learn') ||
+               messageContent.toLowerCase().includes('how') ||
+               messageContent.toLowerCase().includes('teach')) {
+      gifCategory = 'educational';
+    } else if (messageContent.toLowerCase().includes('pray') ||
+               messageContent.toLowerCase().includes('spiritual') ||
+               messageContent.toLowerCase().includes('islamic') ||
+               messageContent.toLowerCase().includes('allah')) {
+      gifCategory = 'spiritual';
+    }
+
+    const gifsInCategory = this.dummyGifs[gifCategory];
+    const randomGif = gifsInCategory[Math.floor(Math.random() * gifsInCategory.length)];
 
     return {
-      type: 'video',
-      url: randomVideo,
-      caption: this.generateVideoCaption(emotion, messageContent)
+      type: 'gif',
+      url: randomGif,
+      caption: this.generateGifCaption(emotion, messageContent, gifCategory)
     };
+  }
+
+  private generateDummyVideo(emotion: EmotionType, messageContent: string): DummyMedia {
+    // Keep this method for backward compatibility
+    return this.generateDummyGif(emotion, messageContent);
   }
 
   private generateSuggestions(emotion: EmotionType, messageContent: string): DummyMedia[] {
@@ -221,21 +268,40 @@ export class MediaService {
     return emotionCaptions[Math.floor(Math.random() * emotionCaptions.length)];
   }
 
-  private generateVideoCaption(emotion: EmotionType, _messageContent: string): string {
+  private generateGifCaption(emotion: EmotionType, _messageContent: string, gifCategory?: string): string {
+    // If GIF category is provided, use category-specific captions
+    if (gifCategory) {
+      const categoryCaptions: Record<string, string> = {
+        spiritual: '🤲 Peaceful spiritual GIF',
+        calming: '🌿 Soothing animated GIF to relax',
+        motivational: '✨ Inspiring animated GIF',
+        educational: '📚 Educational GIF animation',
+        happy: '😊 Joyful animated GIF',
+        general: '🌟 Animated GIF'
+      };
+      return categoryCaptions[gifCategory] || categoryCaptions.general;
+    }
+
+    // Fallback to emotion-based captions
     const captions: Record<EmotionType, string> = {
-      angry: 'Calming video to help you relax',
-      fear: 'Reassuring content to ease your concerns',
-      urgent: 'Quick video guide for immediate help',
-      confused: 'Video explanation to clarify things',
-      happy: 'Celebratory video content!',
-      sad: 'Comforting video to help you feel better',
-      surprise: 'Amazing video content to share the wonder',
-      disgust: 'Pleasant video to refresh your perspective',
-      grateful: 'Heartwarming video to appreciate',
-      neutral: 'Related video content'
+      angry: '🌿 Calming GIF to help you relax',
+      fear: '💚 Reassuring animated GIF',
+      urgent: '⚡ Quick animated guide',
+      confused: '💡 Clarifying GIF animation',
+      happy: '🎉 Celebratory animated GIF!',
+      sad: '🤗 Comforting animated GIF',
+      surprise: '🌟 Amazing animated GIF',
+      disgust: '🌸 Pleasant GIF to refresh your mood',
+      grateful: '💝 Heartwarming animated GIF',
+      neutral: '🌟 Related animated GIF'
     };
 
-    return captions[emotion] || 'Helpful video content';
+    return captions[emotion] || '🌟 Helpful animated GIF';
+  }
+
+  private generateVideoCaption(emotion: EmotionType, _messageContent: string, videoCategory?: string): string {
+    // Redirect to GIF captions for consistency
+    return this.generateGifCaption(emotion, _messageContent, videoCategory);
   }
 
   private getSuggestionsForEmotion(emotion: EmotionType, _messageContent: string): string[] {
@@ -310,10 +376,11 @@ export class MediaService {
 
     // Add context-specific additional media
     if (lowerContext.includes('tutorial') || lowerContext.includes('learn') || lowerContext.includes('how to')) {
+      const educationalGifs = this.dummyGifs['educational'];
       media.push({
-        type: 'video',
-        url: this.dummyVideos[0],
-        caption: 'Step-by-step tutorial video'
+        type: 'gif',
+        url: educationalGifs[0],
+        caption: '📚 Educational GIF animation'
       });
     }
 

@@ -21,7 +21,7 @@ export class RedisVectorService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisVectorService.name);
   private client: Redis;
   private readonly indexName = 'document_vectors';
-  private readonly vectorDimension = 1536; // Bedrock embedding dimension
+  private readonly vectorDimension = 1024; // Bedrock Titan v1 embedding dimension
 
   constructor(private configService: ConfigService) {
     const host = this.configService.get<string>('redis.host', 'localhost');
@@ -128,8 +128,11 @@ export class RedisVectorService implements OnModuleInit, OnModuleDestroy {
     threshold: number = 0.7
   ): Promise<VectorSearchResult[]> {
     try {
+      this.logger.log(`🔍 Vector search called: query_dims=${queryVector.length}, limit=${limit}, threshold=${threshold}`);
       // Use manual similarity search since we don't have Redis Search module
-      return this.fallbackTextSearch(queryVector, limit, threshold);
+      const results = await this.fallbackTextSearch(queryVector, limit, threshold);
+      this.logger.log(`🔍 Vector search completed: found ${results.length} results`);
+      return results;
     } catch (error) {
       this.logger.error('Error performing vector search:', error);
       return [];
@@ -140,8 +143,11 @@ export class RedisVectorService implements OnModuleInit, OnModuleDestroy {
     try {
       // Get all document IDs from the set
       const docIds = await this.client.smembers('doc_ids');
+      this.logger.log(`🔍 Searching through ${docIds.length} documents, checking first ${Math.min(docIds.length, limit * 2)}`);
 
       const results: VectorSearchResult[] = [];
+      let checkedCount = 0;
+      let validEmbeddingCount = 0;
 
       for (const docId of docIds.slice(0, limit * 2)) { // Get more than needed for filtering
         try {
@@ -150,9 +156,15 @@ export class RedisVectorService implements OnModuleInit, OnModuleDestroy {
 
           if (docString) {
             const doc = JSON.parse(docString) as VectorDocument;
+            checkedCount++;
 
             if (doc.embedding && doc.embedding.length > 0) {
+              validEmbeddingCount++;
               const similarity = this.cosineSimilarity(queryVector, doc.embedding);
+
+              if (checkedCount <= 3) {
+                this.logger.log(`🔍 Sample doc ${docId}: similarity=${similarity.toFixed(4)}, threshold=${threshold}`);
+              }
 
               if (similarity >= threshold) {
                 results.push({
@@ -169,6 +181,8 @@ export class RedisVectorService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
+      this.logger.log(`🔍 Search summary: checked ${checkedCount} docs, ${validEmbeddingCount} had embeddings, ${results.length} above threshold`);
+
       // Sort by similarity and limit
       results.sort((a, b) => b.score - a.score);
       return results.slice(0, limit);
@@ -180,7 +194,8 @@ export class RedisVectorService implements OnModuleInit, OnModuleDestroy {
 
   private cosineSimilarity(a: number[], b: number[]): number {
     if (a.length !== b.length) {
-      throw new Error('Vectors must have the same length');
+      this.logger.warn(`Vector dimension mismatch: query=${a.length}, document=${b.length}`);
+      throw new Error(`Vectors must have the same length: query=${a.length}, document=${b.length}`);
     }
 
     let dotProduct = 0;

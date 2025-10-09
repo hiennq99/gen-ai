@@ -10,6 +10,13 @@ export interface Message {
   timestamp: Date;
   emotion?: string; // Primary emotion for backward compatibility
   emotions?: string[]; // Multiple detected emotions
+  emotionAnalysis?: {
+    primaryEmotion: string;
+    secondaryEmotions?: string[];
+    intensity?: 'low' | 'medium' | 'high';
+    confidence?: number;
+    aiEnhanced?: boolean;
+  };
   emotionTags?: {
     inputEmotions: string[];
     responseEmotions: string[];
@@ -114,6 +121,8 @@ export const useChatStore = create<ChatStore>()(
           ...message,
           id: uuidv4(),
           timestamp: new Date(),
+          // Extract emotionAnalysis from metadata if it exists
+          emotionAnalysis: message.metadata?.emotionAnalysis || message.emotionAnalysis,
         };
 
         set((state) => {
@@ -244,6 +253,8 @@ export const useChatStore = create<ChatStore>()(
                     content: conv.userMessage || '',
                     timestamp: createdAt,
                     emotion: conv.emotion?.primaryEmotion,
+                    emotionAnalysis: conv.emotion,
+                    emotionTags: conv.emotionTags,
                     confidence: conv.emotion?.confidence,
                   },
                   {
@@ -251,6 +262,7 @@ export const useChatStore = create<ChatStore>()(
                     role: 'assistant' as const,
                     content: conv.assistantMessage || '',
                     timestamp: createdAt,
+                    emotionTags: conv.emotionTags,
                     metadata: conv.metadata,
                   }
                 ],
@@ -285,34 +297,33 @@ export const useChatStore = create<ChatStore>()(
         try {
           set({ isLoading: true });
           const conversation = await conversationService.getConversation(sessionId);
-          
+
           if (conversation) {
             // Transform to local session format
             const messages: Message[] = [];
             let sessionTitle = 'Chat Session';
 
-            // Handle new response format with title
+            // Handle new response format with title and messages array
             const conversationData = conversation.messages || conversation;
             sessionTitle = conversation.title || sessionTitle;
 
             if (Array.isArray(conversationData)) {
+              // New format: messages array already contains user and assistant messages
               conversationData.forEach((msg: any) => {
-                messages.push({
-                  id: uuidv4(),
-                  role: 'user' as const,
-                  content: msg.userMessage,
-                  timestamp: new Date(msg.createdAt),
-                  emotion: msg.emotion?.primaryEmotion,
-                  confidence: msg.emotion?.confidence,
-                });
-                messages.push({
-                  id: uuidv4(),
-                  role: 'assistant' as const,
-                  content: msg.assistantMessage,
-                  timestamp: new Date(msg.createdAt),
-                  metadata: msg.metadata,
-                  media: msg.metadata?.media || [], // Include media
-                });
+                if (msg && msg.content) {
+                  messages.push({
+                    id: uuidv4(),
+                    role: msg.role as 'user' | 'assistant',
+                    content: msg.content || '',
+                    timestamp: new Date(msg.timestamp || Date.now()),
+                    emotion: msg.emotion,
+                    emotionAnalysis: msg.emotionAnalysis,
+                    emotionTags: msg.emotionTags,
+                    confidence: msg.confidence,
+                    metadata: msg.metadata,
+                    media: msg.media || [],
+                  });
+                }
               });
             }
 

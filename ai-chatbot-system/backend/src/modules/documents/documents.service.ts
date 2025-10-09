@@ -33,8 +33,8 @@ export class DocumentsService {
       // Upload to S3
       const s3Url = await this.storageService.uploadDocument(documentId, file);
 
-      // Extract content based on file type
-      const content = await this.documentProcessor.extractContent(file);
+      // Extract content with metadata (including page information for PDFs)
+      const {content, metadata: extractedMetadata} = await this.documentProcessor.extractContentWithMetadata(file);
 
       // Check if content is Q&A format
       const qaPairs = this.qaSplitter.detectAndSplitQA(content, file.originalname);
@@ -59,6 +59,7 @@ export class DocumentsService {
         status: 'processing',
         metadata: {
           ...metadata,
+          ...extractedMetadata,
           originalName: file.originalname,
           mimeType: file.mimetype,
           hasFullContent: true,
@@ -69,8 +70,8 @@ export class DocumentsService {
       // Save to database
       await this.databaseService.saveDocument(document);
 
-      // Process content asynchronously
-      this.processDocumentContent(documentId, content).catch(error => {
+      // Process content asynchronously with metadata
+      this.processDocumentContent(documentId, content, extractedMetadata).catch(error => {
         this.logger.error(`Failed to process document ${documentId}:`, error);
       });
 
@@ -184,10 +185,10 @@ export class DocumentsService {
     return parentDocument;
   }
 
-  async processDocumentContent(documentId: string, content: string): Promise<ProcessingResult> {
+  async processDocumentContent(documentId: string, content: string, documentMetadata?: any): Promise<ProcessingResult> {
     try {
-      // Generate chunks
-      const chunks = this.createChunks(content);
+      // Generate chunks with page information
+      const chunks = this.createChunks(content, documentMetadata);
       
       // Generate embeddings for each chunk
       const processedChunks: DocumentChunk[] = [];
@@ -247,45 +248,91 @@ export class DocumentsService {
     }
   }
 
-  private createChunks(content: string): Array<{ text: string; metadata: any }> {
+  private createChunks(content: string, documentMetadata?: any): Array<{ text: string; metadata: any }> {
     const chunks: Array<{ text: string; metadata: any }> = [];
     const sentences = this.splitIntoSentences(content);
-    
+
     let currentChunk = '';
     let chunkSentences: string[] = [];
-    
+    let currentCharPos = 0;
+
     for (const sentence of sentences) {
       if (currentChunk.length + sentence.length > this.CHUNK_SIZE && currentChunk.length > 0) {
+        const chunkStartPos = currentCharPos - currentChunk.length;
+        const pageInfo = this.findPageForPosition(chunkStartPos, documentMetadata?.pages);
+
         chunks.push({
           text: currentChunk.trim(),
           metadata: {
             sentenceCount: chunkSentences.length,
-            startChar: chunks.length * (this.CHUNK_SIZE - this.CHUNK_OVERLAP),
+            startChar: chunkStartPos,
+            endChar: currentCharPos,
+            page: pageInfo?.page,
+            pageContent: pageInfo?.content?.substring(0, 200) + '...',
+            documentName: documentMetadata?.filename,
+            documentType: documentMetadata?.documentType,
+            totalPages: documentMetadata?.totalPages,
           },
         });
-        
+
         // Keep overlap
         const overlapSentences = chunkSentences.slice(-2);
         currentChunk = overlapSentences.join(' ') + ' ';
         chunkSentences = [...overlapSentences];
       }
-      
+
       currentChunk += sentence + ' ';
       chunkSentences.push(sentence);
+      currentCharPos += sentence.length + 1;
     }
-    
+
     // Add remaining content
     if (currentChunk.trim().length > 0) {
+      const chunkStartPos = currentCharPos - currentChunk.length;
+      const pageInfo = this.findPageForPosition(chunkStartPos, documentMetadata?.pages);
+
       chunks.push({
         text: currentChunk.trim(),
         metadata: {
           sentenceCount: chunkSentences.length,
-          startChar: chunks.length * (this.CHUNK_SIZE - this.CHUNK_OVERLAP),
+          startChar: chunkStartPos,
+          endChar: currentCharPos,
+          page: pageInfo?.page,
+          pageContent: pageInfo?.content?.substring(0, 200) + '...',
+          documentName: documentMetadata?.filename,
+          documentType: documentMetadata?.documentType,
+          totalPages: documentMetadata?.totalPages,
         },
       });
     }
-    
+
     return chunks;
+  }
+
+  private findPageForPosition(charPosition: number, pages?: Array<{page: number, startIndex: number, content: string}>): {page: number, content: string} | null {
+    if (!pages || pages.length === 0) {
+      return null;
+    }
+
+    // Find the page that contains this character position
+    for (let i = 0; i < pages.length; i++) {
+      const currentPage = pages[i];
+      const nextPage = pages[i + 1];
+
+      if (charPosition >= currentPage.startIndex &&
+          (!nextPage || charPosition < nextPage.startIndex)) {
+        return {
+          page: currentPage.page,
+          content: currentPage.content
+        };
+      }
+    }
+
+    // Fallback to last page if position is beyond all pages
+    return {
+      page: pages[pages.length - 1].page,
+      content: pages[pages.length - 1].content
+    };
   }
 
   private splitIntoSentences(text: string): string[] {

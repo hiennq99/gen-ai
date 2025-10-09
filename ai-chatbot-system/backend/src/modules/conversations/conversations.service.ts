@@ -53,10 +53,10 @@ export class ConversationsService {
         firstUserMessage) :
       'Chat Session';
 
-    // Return history with title
+    // Return history with title and transformed messages
     return {
       title,
-      messages: history,
+      messages: this.buildMessages(history),
     };
   }
 
@@ -157,6 +157,14 @@ export class ConversationsService {
         content: conv.userMessage,
         timestamp: conv.createdAt,
         emotion: conv.emotion?.primaryEmotion,
+        emotionAnalysis: conv.emotion ? {
+          primaryEmotion: conv.emotion.primaryEmotion,
+          secondaryEmotions: conv.emotion.secondaryEmotions,
+          intensity: conv.emotion.intensity,
+          confidence: conv.emotion.confidence,
+          aiEnhanced: conv.emotion.aiEnhanced,
+        } : null,
+        emotionTags: conv.emotionTags,
       },
       {
         role: 'assistant',
@@ -164,6 +172,7 @@ export class ConversationsService {
         timestamp: new Date(new Date(conv.createdAt).getTime() + (conv.processingTime || 1000)).toISOString(),
         confidence: conv.confidence,
         media: conv.metadata?.media || [], // Include media from metadata
+        emotionTags: conv.emotionTags,
       },
     ]).flat();
   }
