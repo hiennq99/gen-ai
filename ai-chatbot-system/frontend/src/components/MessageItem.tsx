@@ -3,9 +3,6 @@
 import { useState } from 'react';
 import { Message } from '@/store/chatStore';
 import { User, Bot, Heart, Frown, Smile, AlertCircle, BookOpen, FileText, Zap, HelpCircle, Meh, Eye, ChevronDown, ChevronRight } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { format } from 'date-fns';
 
 // Default image utility function

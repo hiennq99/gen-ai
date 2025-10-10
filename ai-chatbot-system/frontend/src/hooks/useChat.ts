@@ -213,7 +213,7 @@ export function useChat() {
       setLoading(false);
       setTyping(false);
     }
-  }, [currentSession, socket, connected, addMessage, setLoading, setTyping, createSession, fetchSessions, updateSessionId]);
+  }, [currentSession, socket, connected, isConnected, addMessage, setLoading, setTyping, createSession, fetchSessions, updateSessionId]);
 
   const streamMessage = useCallback(async (content: string) => {
     if (!socket || !connected) {

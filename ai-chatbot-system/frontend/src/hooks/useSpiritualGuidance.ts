@@ -25,7 +25,7 @@ interface SpiritualGuidanceOptions {
 export function useSpiritualGuidance() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isConnected, setIsConnected] = useState(true); // Assume connected for now
+  const [isConnected] = useState(true); // Assume connected for now
   const [lastResponse, setLastResponse] = useState<SpiritualGuidanceResponse | null>(null);
 
   const addMessage = useCallback((message: Omit<Message, 'id' | 'timestamp'>) => {
@@ -40,7 +40,7 @@ export function useSpiritualGuidance() {
 
   const sendGuidanceMessage = useCallback(async (
     content: string,
-    options: SpiritualGuidanceOptions = {}
+    _options: SpiritualGuidanceOptions = {}
   ) => {
     try {
       // Add user message
@@ -132,7 +132,7 @@ export function useSpiritualGuidance() {
         .map(m => m.content);
 
       if (userMessages.length < 2) {
-        toast.info('Need at least 2 messages to analyze patterns');
+        toast('Need at least 2 messages to analyze patterns');
         return [];
       }
 

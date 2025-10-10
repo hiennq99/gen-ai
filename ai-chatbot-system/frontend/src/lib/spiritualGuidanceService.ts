@@ -58,6 +58,7 @@ export interface SpiritualGuidanceResponse {
   spiritualDisease?: SpiritualDisease;
   citationLevel: 'perfect_match' | 'related_theme' | 'general_guidance' | 'no_direct_match';
   templateUsed: string;
+  qualityScore?: number;
   metadata?: {
     qualityScore?: number;
     qualityChecks?: any;

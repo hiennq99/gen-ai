@@ -6,10 +6,10 @@ import { Book, Heart, MessageSquare, Settings, BookOpen, Sparkles } from 'lucide
 import { useSpiritualGuidance } from '@/hooks/useSpiritualGuidance';
 import { SpiritualMessageInput } from './SpiritualMessageInput';
 import { SpiritualMessageList } from './SpiritualMessageList';
-import { CitationPanel } from './CitationPanel';
-import { SpiritualDiseasePanel } from './SpiritualDiseasePanel';
-import { QualityIndicator } from './QualityIndicator';
-import { EmptyState } from './EmptyState';
+// import { CitationPanel } from './CitationPanel';
+// import { SpiritualDiseasePanel } from './SpiritualDiseasePanel';
+// import { QualityIndicator } from './QualityIndicator';
+// import { EmptyState } from './EmptyState';
 
 interface SpiritualGuidanceInterfaceProps {
   className?: string;
@@ -26,8 +26,6 @@ export function SpiritualGuidanceInterface({ className }: SpiritualGuidanceInter
     isLoading,
     lastResponse,
     sendGuidanceMessage,
-    analyzeEmotion,
-    getSpiritualDiseases,
     isConnected
   } = useSpiritualGuidance();
 
@@ -131,10 +129,21 @@ export function SpiritualGuidanceInterface({ className }: SpiritualGuidanceInter
         <div className="flex-1 flex min-h-0">
           <div className="flex-1 flex flex-col min-w-0">
             {messages.length === 0 ? (
-              <EmptyState
-                mode={selectedMode}
-                onExampleClick={handleSendMessage}
-              />
+              <div className="flex-1 flex items-center justify-center p-8">
+                <div className="text-center space-y-4">
+                  <BookOpen className="w-16 h-16 text-emerald-400 mx-auto" />
+                  <h3 className="text-xl font-medium text-gray-700">
+                    {selectedMode === 'guidance' && 'Start Your Spiritual Journey'}
+                    {selectedMode === 'learning' && 'Explore Islamic Teachings'}
+                    {selectedMode === 'analysis' && 'Understand Your Emotions'}
+                  </h3>
+                  <p className="text-gray-500 max-w-md">
+                    {selectedMode === 'guidance' && 'Share what\'s on your heart and receive guidance from Islamic spiritual medicine'}
+                    {selectedMode === 'learning' && 'Ask questions about spiritual diseases and their treatments'}
+                    {selectedMode === 'analysis' && 'Describe your emotional patterns for deeper insights'}
+                  </p>
+                </div>
+              </div>
             ) : (
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 <SpiritualMessageList
@@ -208,15 +217,36 @@ export function SpiritualGuidanceInterface({ className }: SpiritualGuidanceInter
               {/* Sidebar Content */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {showQuality && lastResponse && (
-                  <QualityIndicator response={lastResponse} />
+                  <div className="p-4 bg-emerald-50 rounded-lg">
+                    <h4 className="font-medium text-emerald-900 mb-2">Quality Score</h4>
+                    <p className="text-sm text-gray-600">
+                      {lastResponse.qualityScore ? `${Math.round(lastResponse.qualityScore * 100)}%` : 'N/A'}
+                    </p>
+                  </div>
                 )}
 
                 {showCitations && lastResponse?.citations && (
-                  <CitationPanel citations={lastResponse.citations} />
+                  <div className="p-4 bg-blue-50 rounded-lg">
+                    <h4 className="font-medium text-blue-900 mb-2">Citations</h4>
+                    <div className="space-y-2">
+                      {lastResponse.citations.map((citation: any, idx: number) => (
+                        <div key={idx} className="text-sm text-gray-600 border-l-2 border-blue-300 pl-2">
+                          {citation.text || citation}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
 
                 {lastResponse?.spiritualDisease && (
-                  <SpiritualDiseasePanel disease={lastResponse.spiritualDisease} />
+                  <div className="p-4 bg-purple-50 rounded-lg">
+                    <h4 className="font-medium text-purple-900 mb-2">Spiritual Disease</h4>
+                    <p className="text-sm text-gray-600">
+                      {typeof lastResponse.spiritualDisease === 'string'
+                        ? lastResponse.spiritualDisease
+                        : JSON.stringify(lastResponse.spiritualDisease)}
+                    </p>
+                  </div>
                 )}
               </div>
             </div>
