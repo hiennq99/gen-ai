@@ -45,6 +45,7 @@ export interface Message {
       totalDocuments: number;
       contextUsed: boolean;
       message: string;
+      qaMatch?: boolean;
     };
     [key: string]: any;
   };
