@@ -100,11 +100,14 @@ export class BedrockService {
       };
     } catch (error: any) {
       this.logger.error(`Error invoking Claude model (attempt ${retryCount + 1}):`, error.message);
+      this.logger.error('Full error object:', JSON.stringify(error, null, 2));
       this.logger.debug('Bedrock error details:', {
         name: error.name,
         code: error.code,
         statusCode: error.$metadata?.httpStatusCode,
         requestId: error.$metadata?.requestId,
+        message: error.message,
+        stack: error.stack,
       });
 
       // Check if we should retry for throttling errors
@@ -185,17 +188,55 @@ export class BedrockService {
     const { messages, context, systemPrompt, maxTokens, temperature } = request;
 
     const system = this.buildSystemPrompt(systemPrompt, context);
-    
-    return {
+
+    // Validate and sanitize messages
+    const validMessages = messages
+      .filter(msg => msg && msg.role && msg.content) // Filter out invalid messages
+      .map(msg => {
+        // Ensure content is a string
+        const content = typeof msg.content === 'string'
+          ? msg.content.trim()
+          : String(msg.content || '').trim();
+
+        // Ensure role is valid (user or assistant)
+        const role = msg.role === 'assistant' ? 'assistant' : 'user';
+
+        return {
+          role,
+          content,
+        };
+      })
+      .filter(msg => msg.content.length > 0); // Remove empty messages
+
+    // Ensure we have at least one message
+    if (validMessages.length === 0) {
+      this.logger.warn('No valid messages found, adding default message');
+      validMessages.push({
+        role: 'user',
+        content: 'Hello',
+      });
+    }
+
+    // Ensure first message is from user (Claude requirement)
+    if (validMessages[0].role !== 'user') {
+      this.logger.warn('First message is not from user, adding placeholder user message');
+      validMessages.unshift({
+        role: 'user',
+        content: 'Hello',
+      });
+    }
+
+    const payload = {
       anthropic_version: 'bedrock-2023-05-31',
       max_tokens: maxTokens || this.maxTokens,
       temperature: temperature || this.temperature,
       system,
-      messages: messages.map(msg => ({
-        role: msg.role,
-        content: msg.content,
-      })),
+      messages: validMessages,
     };
+
+    this.logger.debug('Built Claude payload:', JSON.stringify(payload, null, 2));
+
+    return payload;
   }
 
   private buildSystemPrompt(customPrompt?: string, context?: string): string {
