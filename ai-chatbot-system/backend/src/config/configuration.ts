@@ -8,9 +8,9 @@ export default () => ({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
     
     bedrock: {
-      modelId: process.env.BEDROCK_MODEL_ID || 'anthropic.claude-3-sonnet-20240229-v1:0',
+      modelId: process.env.BEDROCK_MODEL_ID || 'amazon.nova-lite-v1:0',
       maxTokens: parseInt(process.env.BEDROCK_MAX_TOKENS || '4096', 10),
-      temperature: parseFloat(process.env.BEDROCK_TEMPERATURE || '0.7'),
+      temperature: parseFloat(process.env.BEDROCK_TEMPERATURE || '0.8'),
     },
     
     dynamodb: {

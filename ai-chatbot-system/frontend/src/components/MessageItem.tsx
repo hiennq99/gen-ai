@@ -67,8 +67,31 @@ interface MessageItemProps {
 const formatAnswerText = (text: string) => {
   if (!text) return text;
 
-  if (text.includes('▪️')) {
-    const parts = text.split('▪️').filter(part => part.trim().length > 0);
+  // Extract all citations and collect them
+  const citations: string[] = [];
+  let formatted = text.replace(/\[([^\]]+\s+\d+:\d+[^\]]*)\]/g, (match, citation) => {
+    citations.push(citation);
+    return ''; // Remove from text
+  });
+
+  // First, add line breaks for Islamic text patterns
+  formatted = formatted
+    // Add breaks before Quranic references
+    .replace(/(Allāh|All\u0101h)\s*says:/gi, '\n\n$1 says:')
+    .replace(/The Prophet\s+(said|taught|ﷺ said):/gi, '\n\nThe Prophet $1:')
+    // Add breaks before list items with "o "
+    .replace(/\s+o\s+"/g, '\n\no "')
+    .replace(/\s+o\s+'/g, "\n\no '")
+    // Add breaks before section headers (ALL CAPS words)
+    .replace(/\s+([A-Z][A-Z\s]{10,})/g, '\n\n$1')
+    // Add breaks before common Islamic terms that start sections
+    .replace(/\s+(Prophetic & Scholarly Evidence)/g, '\n\n$1')
+    .replace(/\s+(SYMPTOMS|TREATMENTS|EXCEPTIONS)/g, '\n\n$1')
+    .replace(/\s+(Academic|Spiritual|Scholarly)/g, '\n\n$1');
+
+  // Handle bullet points
+  if (formatted.includes('▪️')) {
+    const parts = formatted.split('▪️').filter(part => part.trim().length > 0);
 
     if (parts.length > 1) {
       let result = parts[0].trim();
@@ -77,18 +100,23 @@ const formatAnswerText = (text: string) => {
         const spacedPart = part.startsWith(' ') ? part : ' ' + part;
         result += '\n▪️' + spacedPart;
       }
-      const finalText = result
-        .replace(/(\s+)(Inhale:)/g, '\n$2')
-        .replace(/(\s+)(Exhale:)/g, '\n$2')
-        .trim();
-      return finalText;
+      formatted = result;
     }
   }
 
-  return text
+  // Handle breathing patterns
+  formatted = formatted
     .replace(/(\s+)(Inhale:)/g, '\n$2')
     .replace(/(\s+)(Exhale:)/g, '\n$2')
     .trim();
+
+  // Add citations at the end if any were found
+  if (citations.length > 0) {
+    const uniqueCitations = Array.from(new Set(citations));
+    formatted += '\n\n───────────\n📖 References:\n' + uniqueCitations.map((c, i) => `${i + 1}. ${c}`).join('\n');
+  }
+
+  return formatted;
 };
 
 // Helper function to render formatted text (same as admin CMS)
@@ -98,25 +126,47 @@ const renderFormattedText = (text: string) => {
   const formattedText = formatAnswerText(text);
   if (!formattedText) return null;
 
-  return formattedText.split('\n').map((line, index) => {
+  // Handle both actual newlines and escaped \n from backend
+  const lines = formattedText.split(/\\n|\n/);
+
+  return lines.map((line, index) => {
     const trimmedLine = line.trim();
 
-    // Check for bullet points (▪️, •, -, *, ○, ●, ▸, ►)
-    if (trimmedLine.match(/^[▪️•\-\*○●▸►]\s*/) || trimmedLine.startsWith('▪️')) {
+    // Check for bullet points including "o " pattern from Islamic texts
+    // Patterns: ▪️, •, -, *, ○, ●, ▸, ►, or "o " at start
+    if (trimmedLine.match(/^[▪️•\-\*○●▸►]\s*/) || trimmedLine.startsWith('▪️') || trimmedLine.match(/^o\s+["""]/) || trimmedLine.match(/^o\s+[A-Z]/)) {
       return (
         <div key={index} style={{
           marginLeft: '20px',
-          marginBottom: '6px',
+          marginBottom: '8px',
           position: 'relative',
-          paddingLeft: '12px'
+          paddingLeft: '16px',
+          lineHeight: '1.6'
         }}>
           <span style={{
             position: 'absolute',
-            left: '-12px',
+            left: '0',
             color: '#059669',
             fontWeight: 'bold'
           }}>•</span>
-          {trimmedLine.replace(/^[▪️•\-\*○●▸►]\s*/, '')}
+          {trimmedLine.replace(/^[▪️•\-\*○●▸►o]\s*/, '')}
+        </div>
+      );
+    }
+
+    // Check for section headers (ALL CAPS or Title Case with special formatting)
+    if (trimmedLine.match(/^[A-Z][A-Z\s&]+$/) || trimmedLine.match(/^[A-Z][a-zA-Z\s&]+:$/)) {
+      return (
+        <div key={index} style={{
+          marginTop: '16px',
+          marginBottom: '8px',
+          fontWeight: '700',
+          fontSize: '15px',
+          color: '#1e40af',
+          borderBottom: '2px solid #3b82f6',
+          paddingBottom: '4px'
+        }}>
+          {trimmedLine}
         </div>
       );
     }
@@ -136,16 +186,35 @@ const renderFormattedText = (text: string) => {
       );
     }
 
+    // Check for Quranic verses or Islamic references (starts with "Allāh says" or has brackets)
+    if (trimmedLine.match(/^(Allāh|All\u0101h|The Prophet|Imam)\s+(says|said|taught)/i) || trimmedLine.match(/\[.*\d+:\d+.*\]/)) {
+      return (
+        <div key={index} style={{
+          marginTop: '12px',
+          marginBottom: '12px',
+          padding: '12px',
+          backgroundColor: '#f0fdf4',
+          borderLeft: '4px solid #059669',
+          borderRadius: '4px',
+          fontStyle: 'italic',
+          color: '#065f46',
+          lineHeight: '1.7'
+        }}>
+          {trimmedLine}
+        </div>
+      );
+    }
+
     // Empty lines
     if (!trimmedLine) {
-      return <div key={index} style={{ height: '8px' }} />;
+      return <div key={index} style={{ height: '12px' }} />;
     }
 
     // Regular lines
     return (
       <div key={index} style={{
-        marginBottom: '6px',
-        lineHeight: '1.6',
+        marginBottom: '8px',
+        lineHeight: '1.7',
         color: '#374151'
       }}>
         {trimmedLine}

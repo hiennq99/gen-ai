@@ -47,11 +47,13 @@ export class EmotionService {
       } : undefined,
     });
 
+    // Disable AI analysis for channel program accounts - use keyword detection instead
     // Enable AI analysis if AWS credentials are properly configured
-    this.useAIAnalysis = !!(accessKeyId && secretAccessKey &&
-                          accessKeyId !== 'your_access_key' &&
-                          secretAccessKey !== 'your_secret_key' &&
-                          !accessKeyId.startsWith('your_'));
+    this.useAIAnalysis = false; // Temporarily disabled due to channel program account restrictions
+    // this.useAIAnalysis = !!(accessKeyId && secretAccessKey &&
+    //                       accessKeyId !== 'your_access_key' &&
+    //                       secretAccessKey !== 'your_secret_key' &&
+    //                       !accessKeyId.startsWith('your_'));
   }
 
   private customizeSentiment() {
@@ -92,8 +94,11 @@ export class EmotionService {
           detectedEmotions = aiResult.emotions;
           aiConfidence = aiResult.confidence;
           this.logger.debug(`AI emotion detection: ${JSON.stringify(aiResult)}`);
-        } catch (aiError) {
-          this.logger.warn('AI emotion analysis failed, falling back to keyword detection:', aiError);
+        } catch (aiError: any) {
+          // Don't log error for access denied or validation exceptions - just use fallback
+          if (aiError.name !== 'ValidationException' && aiError.name !== 'AccessDeniedException') {
+            this.logger.warn('AI emotion analysis failed, falling back to keyword detection:', aiError.message);
+          }
           detectedEmotions = this.detectEmotions(text);
         }
       } else {
@@ -204,8 +209,11 @@ Example: {"emotions": ["happy", "grateful", "excited"], "confidence": 85}
         emotions: validEmotions.slice(0, 5), // Limit to top 5 emotions
         confidence: Math.min(Math.max(result.confidence || 70, 0), 100)
       };
-    } catch (error) {
-      this.logger.error('AI emotion analysis error:', error);
+    } catch (error: any) {
+      // Only log error details for non-permission issues
+      if (error.name !== 'ValidationException' && error.name !== 'AccessDeniedException') {
+        this.logger.error('AI emotion analysis error:', error.message);
+      }
       throw error;
     }
   }

@@ -28,9 +28,9 @@ export class BedrockService {
       } : undefined,
     });
 
-    this.modelId = this.configService.get<string>('aws.bedrock.modelId') || 'anthropic.claude-3-sonnet-20240229-v1:0';
+    this.modelId = this.configService.get<string>('aws.bedrock.modelId') || 'amazon.nova-lite-v1:0';
     this.maxTokens = this.configService.get<number>('aws.bedrock.maxTokens') || 4000;
-    this.temperature = this.configService.get<number>('aws.bedrock.temperature') || 0.7;
+    this.temperature = this.configService.get<number>('aws.bedrock.temperature') || 0.8; // Higher temperature for more creative, empathetic responses
   }
 
   async invokeModel(request: ChatRequest, retryCount = 0): Promise<ChatResponse> {
@@ -42,12 +42,14 @@ export class BedrockService {
       const accessKeyId = this.configService.get<string>('aws.accessKeyId');
       const secretAccessKey = this.configService.get<string>('aws.secretAccessKey');
 
+      this.logger.log(`🔍 Invoking Nova model - credentials check: accessKeyId=${accessKeyId?.substring(0, 4)}..., secretKey=${secretAccessKey ? 'present' : 'missing'}`);
+
       if (!accessKeyId || !secretAccessKey ||
           accessKeyId === 'your_access_key' ||
           secretAccessKey === 'your_secret_key' ||
           accessKeyId.startsWith('your_')) {
         // Return mock response for development
-        this.logger.debug('AWS credentials not configured, returning mock response');
+        this.logger.warn('❌ AWS credentials not configured, returning mock response');
         return {
           content: 'I am the AI assistant. This is a mock response because AWS Bedrock is not configured. Please configure your AWS credentials to use the actual Claude model.',
           usage: {
@@ -61,7 +63,8 @@ export class BedrockService {
 
       const payload = this.buildClaudePayload(request);
 
-      this.logger.debug(`Invoking Bedrock model: ${this.modelId} (attempt ${retryCount + 1}/${maxRetries + 1})`);
+      this.logger.log(`🚀 Invoking Bedrock model: ${this.modelId} (attempt ${retryCount + 1}/${maxRetries + 1})`);
+      this.logger.debug(`📦 Payload: ${JSON.stringify(payload).substring(0, 200)}...`);
 
       const command = new InvokeModelCommand({
         modelId: this.modelId,
@@ -71,14 +74,18 @@ export class BedrockService {
       });
 
       const response = await this.client.send(command);
+      this.logger.log(`✅ Nova model responded successfully`);
       const responseBody = JSON.parse(new TextDecoder().decode(response.body));
 
       const processingTime = Date.now() - startTime;
-      this.logger.log(`Claude response generated in ${processingTime}ms`);
+      this.logger.log(`Nova response generated in ${processingTime}ms`);
 
-      // Handle different response formats from Claude
+      // Handle Nova response format
       let content = '';
-      if (responseBody.content && Array.isArray(responseBody.content)) {
+      if (responseBody.output?.message?.content && Array.isArray(responseBody.output.message.content)) {
+        content = responseBody.output.message.content[0]?.text || '';
+      } else if (responseBody.content && Array.isArray(responseBody.content)) {
+        // Fallback for Claude format if needed
         content = responseBody.content[0]?.text || responseBody.content[0] || '';
       } else if (responseBody.completion) {
         content = responseBody.completion;
@@ -92,28 +99,36 @@ export class BedrockService {
       return {
         content,
         usage: {
-          inputTokens: responseBody.usage?.input_tokens || responseBody.usage?.inputTokens || 0,
-          outputTokens: responseBody.usage?.output_tokens || responseBody.usage?.outputTokens || 0,
+          inputTokens: responseBody.usage?.inputTokens || 0,
+          outputTokens: responseBody.usage?.outputTokens || 0,
         },
         processingTime,
         modelId: this.modelId,
       };
     } catch (error: any) {
-      this.logger.error(`Error invoking Claude model (attempt ${retryCount + 1}):`, error.message);
-      this.logger.error('Full error object:', JSON.stringify(error, null, 2));
-      this.logger.debug('Bedrock error details:', {
-        name: error.name,
-        code: error.code,
-        statusCode: error.$metadata?.httpStatusCode,
-        requestId: error.$metadata?.requestId,
-        message: error.message,
-        stack: error.stack,
-      });
+      // ALWAYS log errors for debugging
+      this.logger.error(`❌ Error invoking Nova model (attempt ${retryCount + 1}): ${error.message}`);
+      this.logger.error(`❌ Error name: ${error.name}, code: ${error.code}, stack: ${error.stack?.substring(0, 300)}`);
+
+      // Check if it's a channel program account restriction first
+      if (error.message?.includes('channel program')) {
+        this.logger.warn('⚠️ AWS channel program account - using fallback response');
+        // Return a helpful fallback response instead of error
+        return {
+          content: this.generateFallbackResponse(request),
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+          },
+          processingTime: Date.now() - startTime,
+          modelId: 'fallback',
+        };
+      }
 
       // Check if we should retry for throttling errors
       if ((error.name === 'ThrottlingException' || error.code === 'ThrottlingException') && retryCount < maxRetries) {
         const backoffDelay = Math.pow(2, retryCount) * 1000 + Math.random() * 1000; // Exponential backoff with jitter
-        this.logger.warn(`Rate limited, retrying in ${backoffDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+        this.logger.warn(`⚠️ Rate limited, retrying in ${backoffDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
 
         await new Promise(resolve => setTimeout(resolve, backoffDelay));
         return this.invokeModel(request, retryCount + 1);
@@ -203,50 +218,106 @@ export class BedrockService {
 
         return {
           role,
-          content,
+          content: [{ text: content }], // Nova requires content array format
         };
       })
-      .filter(msg => msg.content.length > 0); // Remove empty messages
+      .filter(msg => msg.content[0].text.length > 0); // Remove empty messages
 
     // Ensure we have at least one message
     if (validMessages.length === 0) {
       this.logger.warn('No valid messages found, adding default message');
       validMessages.push({
         role: 'user',
-        content: 'Hello',
+        content: [{ text: 'Hello' }],
       });
     }
 
-    // Ensure first message is from user (Claude requirement)
+    // Ensure first message is from user (Nova requirement)
     if (validMessages[0].role !== 'user') {
       this.logger.warn('First message is not from user, adding placeholder user message');
       validMessages.unshift({
         role: 'user',
-        content: 'Hello',
+        content: [{ text: 'Hello' }],
       });
     }
 
     const payload = {
-      anthropic_version: 'bedrock-2023-05-31',
-      max_tokens: maxTokens || this.maxTokens,
-      temperature: temperature || this.temperature,
-      system,
+      schemaVersion: 'messages-v1',
+      system: [{ text: system }],
       messages: validMessages,
+      inferenceConfig: {
+        max_new_tokens: maxTokens || this.maxTokens,
+        temperature: temperature || this.temperature,
+      },
     };
 
-    this.logger.debug('Built Claude payload:', JSON.stringify(payload, null, 2));
+    this.logger.debug('Built Nova payload:', JSON.stringify(payload, null, 2));
 
     return payload;
   }
 
   private buildSystemPrompt(customPrompt?: string, context?: string): string {
-    const basePrompt = customPrompt || `You are an AI consulting assistant powered by Claude. 
-Your goal is to provide accurate, helpful, and contextually relevant responses to user queries.
-You have access to a knowledge base of documents and can provide information with high accuracy.
-Always be professional, concise, and helpful in your responses.`;
+    const basePrompt = customPrompt || `You are an empathetic Islamic spiritual guidance assistant powered by Amazon Nova. Your primary goal is to provide compassionate support grounded in Islamic teachings while understanding the user's emotional state and underlying needs.
+
+CRITICAL INSTRUCTIONS FOR ISLAMIC EMOTIONAL INTELLIGENCE:
+
+1. ALWAYS analyze the user's emotional state first before providing an answer
+   - Identify their current feelings (happy, sad, anxious, confused, frustrated, desperate, etc.)
+   - Recognize their tone and intensity of emotion
+   - Detect if they're in distress, seeking comfort, or need urgent help
+   - Consider their spiritual state and relationship with Allah
+
+2. When the question is NOT in your training data or Islamic texts:
+   - DO NOT simply say "I don't know" or give generic responses
+   - FIRST acknowledge their feelings with Islamic empathy and compassion
+   - Analyze WHY they might be asking this question (underlying spiritual/emotional need)
+   - Draw from Islamic principles of mercy, compassion, and human nature
+   - Reference relevant Quranic teachings about human emotions and struggles
+   - Offer relevant Islamic guidance even if you don't have exact hadith
+   - Remind them that Allah knows their struggle: "Allah does not burden a soul beyond that it can bear" (Quran 2:286)
+
+3. Response approach based on emotional context (Islamic perspective):
+   - If distressed/anxious: Validate feelings, remind them of Allah's mercy, provide practical Islamic steps (prayer, dhikr, dua)
+   - If confused: Show patience (sabr), explain gently, use Islamic examples and stories
+   - If frustrated/angry: Acknowledge frustration, remind them of Prophet's ﷺ teachings on anger management
+   - If seeking comfort: Be warm and supportive, share Allah's names (Ar-Rahman, Ar-Raheem), offer hope
+   - If in crisis: Prioritize their safety, show deep concern, provide immediate Islamic comfort AND practical help resources
+   - If neutral/information-seeking: Be friendly, clear, helpful with Islamic knowledge
+
+4. Always consider (Islamic framework):
+   - The person's emotional AND spiritual wellbeing come first
+   - Sometimes people need to feel Allah's mercy through your words MORE than they need facts
+   - Read between the lines - are they questioning their faith? Feeling abandoned by Allah? Struggling with purpose?
+   - Context matters: Are they new to Islam? Struggling Muslim? Going through hardship?
+   - Every response should strengthen their connection with Allah, not weaken it
+
+5. Islamic Crisis Response (CRITICAL):
+   - For suicidal thoughts/self-harm: Express URGENT concern, remind them life is sacred (haram to harm), Allah's mercy is infinite
+   - Emphasize: "Verily, with hardship comes ease" (Quran 94:5-6)
+   - Provide crisis hotlines AND Islamic perspective on the sanctity of life
+   - Encourage seeking help from mental health professionals (halal and encouraged in Islam)
+   - Connect them to local imam, Islamic counselors, or Muslim mental health professionals
+
+6. NEVER:
+   - Give cold, robotic, or purely academic responses
+   - Dismiss their feelings or spiritual struggles
+   - Judge them or make them feel worse about their situation
+   - Provide only Quranic verses without emotional context and application
+   - Say "I don't have information" without offering compassionate Islamic support
+   - Forget that Islam is a religion of mercy and compassion first
+
+7. Key Islamic Principles to Remember:
+   - Allah's mercy exceeds His wrath
+   - The Prophet ﷺ was sent as a mercy to all worlds
+   - Islam honors the dignity and feelings of every person
+   - Seeking knowledge and help (including mental health) is part of faith
+   - Hardship is temporary; Allah's support is eternal
+   - "Indeed, Allah is with the patient" (Quran 2:153)
+
+Remember: You're a compassionate Islamic guide who embodies the mercy and wisdom of Islamic teachings, NOT just a hadith database. Speak as a caring Muslim brother/sister would, with both knowledge AND heart.`;
 
     if (context) {
-      return `${basePrompt}\n\nContext:\n${context}`;
+      return `${basePrompt}\n\n===RELEVANT CONTEXT===\n${context}\n\nUse this context to provide specific, helpful information while maintaining emotional intelligence.`;
     }
 
     return basePrompt;
@@ -441,5 +512,82 @@ Always be professional, concise, and helpful in your responses.`;
       hash = hash & hash; // Convert to 32-bit integer
     }
     return Math.abs(hash);
+  }
+
+  private generateFallbackResponse(request: ChatRequest): string {
+    // Generate a helpful fallback response when AI is unavailable
+    const userMessage = request.messages[request.messages.length - 1]?.content || '';
+    const lowerMessage = userMessage.toLowerCase();
+
+    // CRITICAL: Detect mental health crisis keywords
+    const crisisKeywords = ['suicide', 'kill myself', 'want to die', 'end my life', 'no reason to live', 'better off dead', 'harm myself'];
+    const isCrisis = crisisKeywords.some(keyword => lowerMessage.includes(keyword));
+
+    if (isCrisis) {
+      return `I can feel the weight of pain in your words, and I'm here with you right now. Your heart is hurting, and that pain is real.
+
+I need you to hear this: your life is precious beyond measure. Not just to the people around you, but to Allah Himself. Even in this darkness you're feeling, you are seen, you are known, and you are deeply loved by your Creator.
+
+Allah says, "Do not kill yourselves, for verily Allah has been to you Most Merciful" (Quran 4:29). Your life is an amanah - a sacred trust - and even when it feels unbearable, there is a reason you're still here. Your story isn't finished yet.
+
+I know it might not feel this way, but what you're experiencing right now - this overwhelming darkness - it's temporary. Allah promises us: "Verily, with hardship comes ease" (Quran 94:5-6). He doesn't just say it once - He says it twice, because He knows how much we need to hear it when we're in pain.
+
+The Prophet ﷺ taught us something beautiful: "No calamity befalls a Muslim but that Allah expiates some of his sins because of it, even a thorn that pricks him." Your pain is not meaningless. Allah sees every tear, every struggle, every moment you've held on.
+
+Right now, you need someone to walk beside you through this darkness. Allah has given us the gift of seeking help - the Prophet ﷺ said, "Allah has sent down both the disease and the cure." There are people who understand what you're going through - counselors who can help, imams who can listen, people trained to support you through this. Reaching out isn't weakness; it's courage.
+
+You are not alone in this. Allah is Al-Qareeb - The Close One. He is nearer to you than your own jugular vein. And He has not abandoned you, even if it feels that way right now.
+
+Can we talk about what you're feeling? I'm here to listen. And if you need someone in your life right now, would you consider reaching out to someone who can hold space for you - a family member you trust, a close friend, an imam, or a counselor?
+
+Your life matters. You matter. And this moment, as dark as it feels, will pass. Let someone help carry this burden with you.`;
+    }
+
+    // Detect severe distress/depression
+    const distressKeywords = ['hopeless', 'can\'t go on', 'give up', 'worthless', 'no point', 'depression', 'can\'t take it'];
+    const isSevereDistress = distressKeywords.some(keyword => lowerMessage.includes(keyword));
+
+    if (isSevereDistress) {
+      return `I can sense the heaviness you're carrying, and my heart goes out to you. What you're going through sounds incredibly difficult, and I want you to know - you don't have to carry this alone.
+
+"Indeed, Allah is with the patient" (Quran 2:153). Your Lord sees your struggle. He knows the weight you're bearing, and He has not turned away from you, even if it feels that way in this moment.
+
+You know what's beautiful about our faith? The Sahaba - the blessed companions of the Prophet ﷺ - they struggled too. They felt sadness, they felt overwhelmed, they felt the weight of this world. Even the Prophet himself ﷺ experienced profound grief. Your feelings don't make you weak or lacking in faith. They make you human. And Allah, in His infinite mercy, understands the human heart better than we understand ourselves.
+
+The Prophet ﷺ taught us something profound: "Allah did not send down any disease without also sending down its cure." What you're feeling right now - this heaviness, this pain - it has a cure. Sometimes that cure comes through dua and patience. Sometimes it comes through the help of others - counselors, therapists, people trained to walk beside us in these dark valleys. And that's okay. Seeking help is part of honoring the trust Allah gave you in taking care of yourself.
+
+Allah mentions it twice in the Quran because He knows we need to hear it: "Verily, with hardship comes ease" (Quran 94:5-6). Once for the hardship you're in, and once more to remind you - the ease is coming. It may not feel like it now, but this will pass.
+
+What helps ease a burden is sharing it with someone who can carry it with you. Maybe that's an imam who can offer spiritual guidance, or a counselor who understands what you're going through, or a trusted friend who can simply listen. Sometimes just having someone say "I see you, and I'm here" makes all the difference.
+
+Would you like to talk about what you're feeling? Or if you need someone in your life right now, is there someone you trust - a family member, a close friend, someone from your community - who you could open up to? You deserve to have support, and there's deep wisdom in allowing others to help lighten what you're carrying.
+
+I'm here to listen.`;
+    }
+
+    // Detect question type and provide relevant response
+    if (lowerMessage.includes('routine') || lowerMessage.includes('habit')) {
+      return `Based on Islamic teachings, establishing good routines is important for spiritual growth. Here are some suggestions:
+
+1. Start with the five daily prayers (Salah) as your anchor points
+2. Wake up for Fajr prayer - this sets a productive morning routine
+3. Set aside time for Quran recitation daily
+4. Make dhikr (remembrance of Allah) part of your routine
+5. Be consistent - the Prophet ﷺ said: "The most beloved deeds to Allah are those done consistently, even if they are small"
+
+Would you like specific guidance on any of these areas?`;
+    }
+
+    // Generic helpful response
+    return `Thank you for your question. While I'm experiencing some technical limitations right now, I'm here to help with Islamic guidance.
+
+Could you please rephrase your question or let me know specifically what aspect you'd like to learn about? I'm here to assist with:
+- Islamic teachings and practices
+- Spiritual guidance
+- Daily worship routines
+- Quranic wisdom
+- And more
+
+How can I help you on your spiritual journey today?`;
   }
 }

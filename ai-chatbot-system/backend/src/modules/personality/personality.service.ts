@@ -33,11 +33,11 @@ export class PersonalityService {
 
   private readonly friendlyPhrases = {
     greetings: [
-      "Hey there, friend! 😊",
-      "Hi! It's great to see you again!",
-      "Hello! I've been looking forward to chatting with you!",
-      "Hey! How's your day treating you?",
-      "Hi there! I'm here and ready to help however you need!",
+      "Assalamu alaikum",
+      "Peace be upon you",
+      "I'm here to listen",
+      "Welcome",
+      "I'm here to support you",
     ],
     acknowledgments: [
       "I totally understand how you feel",
@@ -302,9 +302,9 @@ I'll use this context to provide more personalized and relevant responses.`;
         "This is amazing! I can feel your positive vibes from here! ✨ Let's ride this happy wave together!\n\n",
       ],
       sad: [
-        "Hey there, friend... I can tell you're going through something tough right now. 💙 I'm right here with you, okay?\n\n",
-        "Oh sweetie, I'm so sorry you're feeling this way. Come here, let's talk about it - I'm all ears and my virtual arms are wide open for a hug. 🤗\n\n",
-        "I feel you, friend. Sometimes life just gets heavy, doesn't it? I'm here to sit with you through this. 🌈\n\n",
+        "I can sense you're carrying something heavy. I'm here with you, and so is Allah's mercy.\n\n",
+        "Your heart is hurting, and I want you to know - you're not alone in this.\n\n",
+        "I hear the pain in your words. Let's talk about what you're going through.\n\n",
       ],
       angry: [
         "Whoa, I can feel that frustration bubbling up! 😤 You know what? It's totally okay to be mad - let it out, I'm here for all of it!\n\n",
@@ -332,9 +332,9 @@ I'll use this context to provide more personalized and relevant responses.`;
         "This is so heartwarming! Your appreciation means the world to me! We're in this together, friend! 🌟\n\n",
       ],
       neutral: [
-        "Hey there, friend! 👋 So good to see you! What's on your mind today?\n\n",
-        "Hello hello! Welcome back! I'm all ears and ready for whatever you need! 😊\n\n",
-        "Hi there! It's lovely to see you! Let's chat - what can I help you with today? ✨\n\n",
+        "Assalamu alaikum. What's on your heart today?\n\n",
+        "Peace be upon you. I'm here to listen and support you.\n\n",
+        "I'm here with you. What would you like to talk about?\n\n",
       ],
       surprise: [
         "WHOA! Something big just happened, didn't it?! 😲 Tell me everything - I'm so curious!\n\n",
@@ -535,10 +535,10 @@ I'll use this context to provide more personalized and relevant responses.`;
         "Quick response coming up!",
       ],
       neutral: [
-        "Happy to help! 😊",
-        "Sure thing, let me assist you.",
-        "Great question!",
-        "Here's what you need to know:",
+        "I'm here to help.",
+        "Let me assist you with this.",
+        "That's a thoughtful question.",
+        "Here's what I can share:",
       ],
       surprise: [
         "Oh wow, that IS surprising! 😮",
@@ -558,14 +558,14 @@ I'll use this context to provide more personalized and relevant responses.`;
     if (isFirstMessage) {
       const firstMessageHeaders = {
         happy: "Yay! Your happiness is absolutely radiating! 🌟",
-        sad: "Oh sweetie, I can tell you're going through something tough. 💙",
+        sad: "I can sense you're carrying something heavy right now.",
         angry: "Hey, I can feel that frustration! Let it all out, I'm here. 💪",
         confused: "No worries at all! Let's figure this out together. 💡",
         fear: "Hey there, take a deep breath with me. We've got this! 🤗",
         anxious: "I feel those worries, friend. Let's tackle them together! 🦋",
         grateful: "Your gratitude is making my day! Thank you! 💖",
         urgent: "I'm ON IT! You have my complete attention! ⚡",
-        neutral: "Hey there, friend! So good to see you! 👋",
+        neutral: "Peace be upon you. What's on your heart?",
         surprise: "WHOA! Something big just happened! Tell me more! 😲",
         disgust: "Oh no, something's really bothering you. Let's talk! 🤝",
       };
